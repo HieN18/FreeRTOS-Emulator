@@ -37,6 +37,8 @@
 
 #define SQUARE_SIDE_LENGTH 50
 
+#define KEYCODE(CHAR) SDL_SCANCODE_##CHAR
+
 static TaskHandle_t DemoTask = NULL;
 
 static coord_t points[3] = { { CORNER_1_X, CORNER_1_Y },
@@ -144,6 +146,15 @@ void updateSquarePosition(square_t *square, unsigned int count)
 	square->y = round(square->y);
 }
 
+void updateTextPositionToLeft(text_t *text, signed int position_x,
+			      unsigned int count)
+{
+	float update_interval = count % 360 * 2 / (2 * M_PI);
+	text->x = position_x - (SCREEN_WIDTH / 6 -
+				(SCREEN_WIDTH / 6) * cos(update_interval));
+	text->x = round(text->x);
+}
+
 void updateTextPositionToRight(text_t *text, signed int position_x,
 			       unsigned int count)
 {
@@ -157,17 +168,24 @@ void updateTextPositionToRight(text_t *text, signed int position_x,
 	text->x = round(text->x);
 }
 
-void updateTextPositionToLeft(text_t *text, signed int position_x,
-			      unsigned int count)
+
+
+typedef struct button {
+	char *name;
+	unsigned int pressed_count;
+} button_t;
+
+button_t *createButton(char *name, unsigned int count)
 {
-	static int text_width = 0;
-	float update_interval = count % 360 * 2 / (2 * M_PI);
-	if (!tumGetTextSize((char *)text, &text_width, NULL)) {
-		text->x = position_x -
-			  (SCREEN_WIDTH / 6 -
-			   (SCREEN_WIDTH / 6) * cos(update_interval));
+	button_t *ret = calloc(1, sizeof(button_t));
+	if (!ret) {
+		fprintf(stderr, "Create button failed!");
+		exit(EXIT_FAILURE);
 	}
-	text->x = round(text->x);
+
+	ret->name = name;
+	ret->pressed_count = count;
+	return ret;
 }
 
 typedef struct buttons_buffer {
@@ -185,21 +203,71 @@ void xGetButtonInput(void)
 	}
 }
 
-#define KEYCODE(CHAR) SDL_SCANCODE_##CHAR
-
-void vDemoTask(void *pvParameters)
+void Handle_Button(button_t *button_A, button_t *button_B, button_t *button_C, button_t *button_D)
 {
-	unsigned int count = 0;
+	#define buttonTextA_X 20
+	#define buttonTextA_Y 50
+	#define buttonTextB_X 20
+	#define buttonTextB_Y 70
+	#define buttonTextC_X 20
+	#define buttonTextC_Y 90
+	#define buttonTextD_X 20
+	#define buttonTextD_Y 110
 
-	circle_t *my_circle =
-		createCircle(CIRCLE_X, CIRCLE_Y, CIRCLE_RADIUS, TUMBlue);
 
-	square_t *my_square =
-		createSquare(SCREEN_WIDTH * 2 / 3 - SQUARE_SIDE_LENGTH / 2,
-			     SCREEN_HEIGHT / 2 - SQUARE_SIDE_LENGTH / 2,
-			     SQUARE_SIDE_LENGTH, SQUARE_SIDE_LENGTH, Green);
+	if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
+		if (buttons.buttons[KEYCODE(A)]) {
+			button_A->pressed_count += 1;
+		}
+		xSemaphoreGive(buttons.lock);
+	}
+	if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
+		if (buttons.buttons[KEYCODE(B)]) {
+			button_B->pressed_count += 1;
+		}
+		xSemaphoreGive(buttons.lock);
+	}
+	if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
+		if (buttons.buttons[KEYCODE(C)]) {
+			button_C->pressed_count += 1;
+		}
+		xSemaphoreGive(buttons.lock);
+	}
+	if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
+		if (buttons.buttons[KEYCODE(D)]) {
+			button_D->pressed_count += 1;
+		}
+		xSemaphoreGive(buttons.lock);
+	}
+	static char buttonTextA[300];
+	static int buttonTextA_width = 0;
+	static char buttonTextB[300];
+	static int buttonTextB_width = 0;
+	static char buttonTextC[300];
+	static int buttonTextC_width = 0;
+	static char buttonTextD[300];
+	static int buttonTextD_width = 0;
 
-	// Create strings
+	sprintf(buttonTextA, "Button A is pressed %u times.",
+		button_A->pressed_count);
+	if (!tumGetTextSize((char *)buttonTextA, &buttonTextA_width, NULL))
+		tumDrawText(buttonTextA, buttonTextA_X, buttonTextA_Y, Black);
+	sprintf(buttonTextB, "Button B is pressed %u times.",
+		button_B->pressed_count);
+	if (!tumGetTextSize((char *)buttonTextB, &buttonTextB_width, NULL))
+		tumDrawText(buttonTextB, buttonTextB_X, buttonTextB_Y, Black);
+	sprintf(buttonTextC, "Button C is pressed %u times.",
+		button_C->pressed_count);
+	if (!tumGetTextSize((char *)buttonTextC, &buttonTextC_width, NULL))
+		tumDrawText(buttonTextC, buttonTextC_X, buttonTextC_Y, Black);
+	sprintf(buttonTextD, "Button D is pressed %u times.",
+		button_D->pressed_count);
+	if (!tumGetTextSize((char *)buttonTextD, &buttonTextD_width, NULL))
+		tumDrawText(buttonTextD, buttonTextD_X, buttonTextD_Y, Black);			
+}
+
+void DrawText(unsigned count) {
+	
 	static char our_string1[100];
 	static char our_string2[100];
 	static int our_string1_width = 0;
@@ -208,6 +276,12 @@ void vDemoTask(void *pvParameters)
 	static char our_string4[100];
 	static int our_string3_width = 0;
 	static int our_string4_width = 0;
+
+	sprintf(our_string1, "Static1");
+	sprintf(our_string2, "Static2");
+	sprintf(our_string3, "Dynamic3");
+	sprintf(our_string4, "Dynamic4");
+
 	text_t *my_text3 = createText(
 		our_string3, SCREEN_WIDTH / 3 - our_string3_width / 2,
 		SCREEN_HEIGHT / 2 - SQUARE_SIDE_LENGTH + DEFAULT_FONT_SIZE / 2,
@@ -216,6 +290,70 @@ void vDemoTask(void *pvParameters)
 		our_string4, SCREEN_WIDTH * 2 / 3 - our_string4_width / 2,
 		SCREEN_HEIGHT / 2 - SQUARE_SIDE_LENGTH + DEFAULT_FONT_SIZE / 2,
 		Black);
+	if (!tumGetTextSize((char *)our_string1, &our_string1_width, NULL))
+		tumDrawText(our_string1,
+			    SCREEN_WIDTH / 3 - our_string1_width / 2,
+			    SCREEN_HEIGHT / 2 + SQUARE_SIDE_LENGTH -
+				    DEFAULT_FONT_SIZE / 2,
+			    Black);
+
+	if (!tumGetTextSize((char *)our_string2, &our_string2_width, NULL))
+		tumDrawText(our_string2,
+			    SCREEN_WIDTH * 2 / 3 - our_string2_width / 2,
+			    SCREEN_HEIGHT / 2 + SQUARE_SIDE_LENGTH -
+				    DEFAULT_FONT_SIZE / 2,
+			    Black);
+
+	// Let my_text4 move
+	
+	updateTextPositionToLeft(
+		my_text4, (SCREEN_WIDTH * 2 / 3 - our_string4_width / 2), count);
+	
+	// printf("check %d \n" , my_text4->x);
+	if (!tumGetTextSize((char *)our_string4, &our_string4_width, NULL))
+		tumDrawText(my_text4->str, my_text4->x, my_text4->y,
+			    my_text4->colour);		
+
+	// Let my_text3 move
+	updateTextPositionToRight(
+		my_text3, SCREEN_WIDTH / 3 - our_string3_width / 2, count);
+
+	
+
+	if (!tumGetTextSize((char *)our_string3, &our_string3_width, NULL))
+		tumDrawText(my_text3->str, my_text3->x, my_text3->y,
+			    my_text3->colour);
+
+	
+}
+
+void clickMouseToResetButtons(button_t *button_A, button_t *button_B,
+			      button_t *button_C, button_t *button_D)
+{
+	if (tumEventGetMouseLeft()) {
+		button_A->pressed_count = 0;
+		button_B->pressed_count = 0;
+		button_C->pressed_count = 0;
+		button_D->pressed_count = 0;
+		Handle_Button(button_A, button_B, button_C, button_D);
+	}
+}
+
+void vDemoTask(void *pvParameters)
+{
+	unsigned int count = 0;
+	circle_t *my_circle =
+		createCircle(CIRCLE_X, CIRCLE_Y, CIRCLE_RADIUS, TUMBlue);
+
+	square_t *my_square =
+		createSquare(SCREEN_WIDTH * 2 / 3 - SQUARE_SIDE_LENGTH / 2,
+			     SCREEN_HEIGHT / 2 - SQUARE_SIDE_LENGTH / 2,
+			     SQUARE_SIDE_LENGTH, SQUARE_SIDE_LENGTH, Green);
+
+	button_t *button_A = createButton("button_A", 0);
+	button_t *button_B = createButton("button_B", 0);
+	button_t *button_C = createButton("button_C", 0);
+	button_t *button_D = createButton("button_D", 0);
 
 	// Needed such that Gfx library knows which thread controlls drawing
 	// Only one thread can call tumDrawUpdateScreen while and thread can call
@@ -227,14 +365,13 @@ void vDemoTask(void *pvParameters)
 		tumEventFetchEvents(
 			FETCH_EVENT_NONBLOCK); // Query events backend for new events, ie. button presses
 		xGetButtonInput(); // Update global input
-
+		clickMouseToResetButtons(button_A, button_B, button_C, button_D);
 		// `buttons` is a global shared variable and as such needs to be
 		// guarded with a mutex, mutex must be obtained before accessing the
 		// resource and given back when you're finished. If the mutex is not
 		// given back then no other task can access the reseource.
 		if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
-			if (buttons.buttons[KEYCODE(
-				    Q)]) { // Equiv to SDL_SCANCODE_Q
+			if (buttons.buttons[KEYCODE(Q)]) { // Equiv to SDL_SCANCODE_Q
 				exit(EXIT_SUCCESS);
 			}
 			xSemaphoreGive(buttons.lock);
@@ -242,51 +379,9 @@ void vDemoTask(void *pvParameters)
 
 		tumDrawClear(White); // Clear screen
 
-		// clock_gettime(CLOCK_REALTIME,
-		//                &the_time); // Get kernel real time
-
-		// Format our string into our char array
-		sprintf(our_string1, "Static1");
-		sprintf(our_string2, "Static2");
-
-		sprintf(our_string3, "Dynamic3");
-		sprintf(our_string4, "Dynamic4");
-
-		if (!tumGetTextSize((char *)our_string1, &our_string1_width,
-				    NULL))
-			tumDrawText(our_string1,
-				    SCREEN_WIDTH / 3 - our_string1_width / 2,
-				    SCREEN_HEIGHT / 2 + SQUARE_SIDE_LENGTH -
-					    DEFAULT_FONT_SIZE / 2,
-				    Black);
-
-		if (!tumGetTextSize((char *)our_string2, &our_string2_width,
-				    NULL))
-			tumDrawText(our_string2,
-				    SCREEN_WIDTH * 2 / 3 -
-					    our_string2_width / 2,
-				    SCREEN_HEIGHT / 2 + SQUARE_SIDE_LENGTH -
-					    DEFAULT_FONT_SIZE / 2,
-				    Black);
-		printf("width1: %d \n", our_string4_width);
-		// Let my_text3 move
-		updateTextPositionToRight(
-			my_text3, SCREEN_WIDTH / 3 - our_string3_width / 2,
-			count);
-		printf("width2: %d \n", our_string3_width);
-		if (!tumGetTextSize((char *)our_string3, &our_string3_width,
-				    NULL))
-			tumDrawText(my_text3->str, my_text3->x, my_text3->y,
-				    my_text3->colour);
-
-		// Let my_text4 move
-		updateTextPositionToLeft(
-			my_text4, SCREEN_WIDTH * 2 / 3 - our_string4_width / 2,
-			count);
-		if (!tumGetTextSize((char *)our_string4, &our_string4_width,
-				    NULL))
-			tumDrawText(my_text4->str, my_text4->x, my_text4->y,
-				    my_text4->colour);
+		Handle_Button(button_A, button_B, button_C, button_D);
+		// Handle the texts
+		DrawText(count);
 
 		// Draw the triangle
 		tumDrawTriangle(points, Red);
@@ -303,7 +398,7 @@ void vDemoTask(void *pvParameters)
 
 		tumDrawUpdateScreen(); // Refresh the screen to draw string
 
-		// Basic sleep of 1000 milliseconds
+		// Basic sleep of 100 milliseconds
 		count++;
 		vTaskDelay((TickType_t)100);
 	}
