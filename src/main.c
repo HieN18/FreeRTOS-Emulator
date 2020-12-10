@@ -23,10 +23,16 @@
 #define mainGENERIC_PRIORITY (tskIDLE_PRIORITY)
 #define mainGENERIC_STACK_SIZE ((unsigned short)2560)
 
+
+// Set time
+#define debounceDelay 50/1000
+
+// Set circle
 #define CIRCLE_X SCREEN_WIDTH / 3
 #define CIRCLE_Y SCREEN_HEIGHT / 2
 #define CIRCLE_RADIUS 30
 
+// Set triangle
 #define TRIANGLE_SIDE_LENGTH 60
 #define CORNER_1_X SCREEN_WIDTH / 2
 #define CORNER_1_Y SCREEN_HEIGHT / 2 - TRIANGLE_SIDE_LENGTH *sqrt(3) / 4
@@ -35,11 +41,29 @@
 #define CORNER_3_X SCREEN_WIDTH / 2 + TRIANGLE_SIDE_LENGTH / 2
 #define CORNER_3_Y SCREEN_HEIGHT / 2 + TRIANGLE_SIDE_LENGTH *sqrt(3) / 4
 
+// Set square
 #define SQUARE_SIDE_LENGTH 50
+
+// Set button
+#define button_pressed 1
+#define button_unpressed 0
+
+
+#define buttonTextA_X 20
+#define buttonTextA_Y 50
+#define buttonTextB_X 20
+#define buttonTextB_Y 70
+#define buttonTextC_X 20
+#define buttonTextC_Y 90
+#define buttonTextD_X 20
+#define buttonTextD_Y 110
 
 #define KEYCODE(CHAR) SDL_SCANCODE_##CHAR
 
 static TaskHandle_t DemoTask = NULL;
+
+static long int lastDebounceTime = 0;
+static unsigned int reading = button_unpressed;
 
 static coord_t points[3] = { { CORNER_1_X, CORNER_1_Y },
 			     { CORNER_2_X, CORNER_2_Y },
@@ -103,6 +127,7 @@ typedef struct text {
 	signed short x; /**< X pixel coord of ball on screen */
 	signed short y; /**< Y pixel coord of ball on screen */
 	unsigned int colour; /**< Hex RGB colour of the ball */
+
 } text_t;
 
 text_t *createText(char *str, signed short initial_x, signed short initial_y,
@@ -172,10 +197,12 @@ void updateTextPositionToRight(text_t *text, signed int position_x,
 
 typedef struct button {
 	char *name;
+	unsigned int SDL_CODE_NUM;
 	unsigned int pressed_count;
+	unsigned int state;
 } button_t;
 
-button_t *createButton(char *name, unsigned int count)
+button_t *createButton(char *name, unsigned int SDL_CODE_NUM, unsigned int count, unsigned int state)
 {
 	button_t *ret = calloc(1, sizeof(button_t));
 	if (!ret) {
@@ -184,7 +211,9 @@ button_t *createButton(char *name, unsigned int count)
 	}
 
 	ret->name = name;
+	ret->SDL_CODE_NUM = SDL_CODE_NUM;
 	ret->pressed_count = count;
+	ret->state = state;
 	return ret;
 }
 
@@ -203,68 +232,56 @@ void xGetButtonInput(void)
 	}
 }
 
-void Handle_Button(button_t *button_A, button_t *button_B, button_t *button_C, button_t *button_D)
+void updatePressedCount(button_t *button)
 {
-	#define buttonTextA_X 20
-	#define buttonTextA_Y 50
-	#define buttonTextB_X 20
-	#define buttonTextB_Y 70
-	#define buttonTextC_X 20
-	#define buttonTextC_Y 90
-	#define buttonTextD_X 20
-	#define buttonTextD_Y 110
-
-
 	if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
-		if (buttons.buttons[KEYCODE(A)]) {
-			button_A->pressed_count += 1;
+		if (button->state == button_pressed) {
+			button->pressed_count += 1;
 		}
 		xSemaphoreGive(buttons.lock);
 	}
-	if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
-		if (buttons.buttons[KEYCODE(B)]) {
-			button_B->pressed_count += 1;
-		}
-		xSemaphoreGive(buttons.lock);
-	}
-	if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
-		if (buttons.buttons[KEYCODE(C)]) {
-			button_C->pressed_count += 1;
-		}
-		xSemaphoreGive(buttons.lock);
-	}
-	if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
-		if (buttons.buttons[KEYCODE(D)]) {
-			button_D->pressed_count += 1;
-		}
-		xSemaphoreGive(buttons.lock);
-	}
-	static char buttonTextA[300];
-	static int buttonTextA_width = 0;
-	static char buttonTextB[300];
-	static int buttonTextB_width = 0;
-	static char buttonTextC[300];
-	static int buttonTextC_width = 0;
-	static char buttonTextD[300];
-	static int buttonTextD_width = 0;
-
-	sprintf(buttonTextA, "Button A is pressed %u times.",
-		button_A->pressed_count);
-	if (!tumGetTextSize((char *)buttonTextA, &buttonTextA_width, NULL))
-		tumDrawText(buttonTextA, buttonTextA_X, buttonTextA_Y, Black);
-	sprintf(buttonTextB, "Button B is pressed %u times.",
-		button_B->pressed_count);
-	if (!tumGetTextSize((char *)buttonTextB, &buttonTextB_width, NULL))
-		tumDrawText(buttonTextB, buttonTextB_X, buttonTextB_Y, Black);
-	sprintf(buttonTextC, "Button C is pressed %u times.",
-		button_C->pressed_count);
-	if (!tumGetTextSize((char *)buttonTextC, &buttonTextC_width, NULL))
-		tumDrawText(buttonTextC, buttonTextC_X, buttonTextC_Y, Black);
-	sprintf(buttonTextD, "Button D is pressed %u times.",
-		button_D->pressed_count);
-	if (!tumGetTextSize((char *)buttonTextD, &buttonTextD_width, NULL))
-		tumDrawText(buttonTextD, buttonTextD_X, buttonTextD_Y, Black);			
 }
+
+void Handle_Debounce(button_t *button)
+{
+	static struct timespec the_time;
+	clock_gettime(CLOCK_REALTIME,
+		      &the_time); // Get kernel real time
+	if(xSemaphoreTake(buttons.lock, 0) == pdTRUE)
+	{
+		if (buttons.buttons[button->SDL_CODE_NUM]) {
+			reading = button_pressed;
+		} else {
+			reading = button_unpressed;
+		}
+		xSemaphoreGive(buttons.lock);
+	}
+	if (reading != button->state) {
+		lastDebounceTime = the_time.tv_sec;
+	}
+	if ((the_time.tv_sec - lastDebounceTime) >= debounceDelay) {
+		if (reading != button->state) {
+			button->state = reading;
+			updatePressedCount(button);
+		}
+	}
+}
+
+void Handle_Button(button_t *button, unsigned short button_X, unsigned short button_Y)
+{
+	static char buttonText[100];
+	static int buttonText_width = 0;
+	Handle_Debounce(button); // debounce input of button
+
+	sprintf(buttonText, "Button %s is pressed %u times.", button->name,
+		button->pressed_count);
+	if (!tumGetTextSize((char *)buttonText, &buttonText_width, NULL))
+		tumDrawText(buttonText, button_X, button_Y, Black);
+}
+
+
+
+
 
 void DrawText(unsigned count) {
 	
@@ -327,15 +344,21 @@ void DrawText(unsigned count) {
 	
 }
 
-void clickMouseToResetButtons(button_t *button_A, button_t *button_B,
-			      button_t *button_C, button_t *button_D)
+// void Handle_Debounce(button_t *button_A, button_t *button_B, button_t *button_C,
+// 		     button_t *button_D)
+
+void clickMouseToResetButtons(button_t *button, unsigned short button_X,
+				      unsigned short button_Y)
 {
 	if (tumEventGetMouseLeft()) {
-		button_A->pressed_count = 0;
-		button_B->pressed_count = 0;
-		button_C->pressed_count = 0;
-		button_D->pressed_count = 0;
-		Handle_Button(button_A, button_B, button_C, button_D);
+		static char buttonText[100];
+		static int buttonText_width = 0;
+		button->pressed_count = 0;
+		sprintf(buttonText, "Button %s is pressed %u times.",
+			button->name, button->pressed_count);
+		if (!tumGetTextSize((char *)buttonText, &buttonText_width,
+				    NULL))
+			tumDrawText(buttonText, button_X, button_Y, Black);
 	}
 }
 
@@ -350,10 +373,11 @@ void vDemoTask(void *pvParameters)
 			     SCREEN_HEIGHT / 2 - SQUARE_SIDE_LENGTH / 2,
 			     SQUARE_SIDE_LENGTH, SQUARE_SIDE_LENGTH, Green);
 
-	button_t *button_A = createButton("button_A", 0);
-	button_t *button_B = createButton("button_B", 0);
-	button_t *button_C = createButton("button_C", 0);
-	button_t *button_D = createButton("button_D", 0);
+	button_t *button_A = createButton("A", SDL_SCANCODE_A, 0, button_unpressed);
+	button_t *button_B = createButton("B", SDL_SCANCODE_B, 0, button_unpressed);
+	button_t *button_C = createButton("C", SDL_SCANCODE_C, 0, button_unpressed);
+	button_t *button_D = createButton("D", SDL_SCANCODE_D, 0, button_unpressed);
+	
 
 	// Needed such that Gfx library knows which thread controlls drawing
 	// Only one thread can call tumDrawUpdateScreen while and thread can call
@@ -364,8 +388,13 @@ void vDemoTask(void *pvParameters)
 	while (1) {
 		tumEventFetchEvents(
 			FETCH_EVENT_NONBLOCK); // Query events backend for new events, ie. button presses
+
 		xGetButtonInput(); // Update global input
-		clickMouseToResetButtons(button_A, button_B, button_C, button_D);
+		// Handle_Debounce(button_A, button_unpressed);
+		
+		
+		// printf("the time: %ld \n", (long int)the_time.tv_sec );
+
 		// `buttons` is a global shared variable and as such needs to be
 		// guarded with a mutex, mutex must be obtained before accessing the
 		// resource and given back when you're finished. If the mutex is not
@@ -379,7 +408,18 @@ void vDemoTask(void *pvParameters)
 
 		tumDrawClear(White); // Clear screen
 
-		Handle_Button(button_A, button_B, button_C, button_D);
+		Handle_Button(button_A, buttonTextA_X, buttonTextA_Y);
+		Handle_Button(button_B, buttonTextB_X, buttonTextB_Y);
+		Handle_Button(button_C, buttonTextC_X, buttonTextC_Y);
+		Handle_Button(button_D, buttonTextD_X, buttonTextD_Y);
+
+		clickMouseToResetButtons(button_A, buttonTextA_X, buttonTextA_Y);
+		clickMouseToResetButtons(button_B, buttonTextB_X, buttonTextB_Y);
+		clickMouseToResetButtons(button_C, buttonTextC_X, buttonTextC_Y);
+		clickMouseToResetButtons(button_D, buttonTextD_X, buttonTextD_Y);
+
+		
+
 		// Handle the texts
 		DrawText(count);
 
