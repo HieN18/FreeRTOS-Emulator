@@ -51,12 +51,16 @@
 
 #define buttonTextA_X 20
 #define buttonTextA_Y 50
-#define buttonTextB_X 20
-#define buttonTextB_Y 70
-#define buttonTextC_X 20
-#define buttonTextC_Y 90
-#define buttonTextD_X 20
-#define buttonTextD_Y 110
+#define buttonTextB_X 80
+#define buttonTextB_Y 50
+#define buttonTextC_X 140
+#define buttonTextC_Y 50
+#define buttonTextD_X 200
+#define buttonTextD_Y 50
+
+#define mouseText_X 20
+#define mouseText_Y 30
+
 
 #define KEYCODE(CHAR) SDL_SCANCODE_##CHAR
 
@@ -64,10 +68,6 @@ static TaskHandle_t DemoTask = NULL;
 
 static long int lastDebounceTime = 0;
 static unsigned int reading = button_unpressed;
-
-static coord_t points[3] = { { CORNER_1_X, CORNER_1_Y },
-			     { CORNER_2_X, CORNER_2_Y },
-			     { CORNER_3_X, CORNER_3_Y } };
 
 typedef struct circle {
 	signed short x; /**< X pixel coord of ball on screen */
@@ -273,7 +273,7 @@ void Handle_Button(button_t *button, unsigned short button_X, unsigned short but
 	static int buttonText_width = 0;
 	Handle_Debounce(button); // debounce input of button
 
-	sprintf(buttonText, "Button %s is pressed %u times.", button->name,
+	sprintf(buttonText, "%s: %u |", button->name,
 		button->pressed_count);
 	if (!tumGetTextSize((char *)buttonText, &buttonText_width, NULL))
 		tumDrawText(buttonText, button_X, button_Y, Black);
@@ -283,7 +283,7 @@ void Handle_Button(button_t *button, unsigned short button_X, unsigned short but
 
 
 
-void DrawText(unsigned count) {
+void DrawText(unsigned count, int shift_x, int shift_y) {
 	
 	static char our_string1[100];
 	static char our_string2[100];
@@ -309,16 +309,16 @@ void DrawText(unsigned count) {
 		Black);
 	if (!tumGetTextSize((char *)our_string1, &our_string1_width, NULL))
 		tumDrawText(our_string1,
-			    SCREEN_WIDTH / 3 - our_string1_width / 2,
+			    SCREEN_WIDTH / 3 - our_string1_width / 2 + shift_x,
 			    SCREEN_HEIGHT / 2 + SQUARE_SIDE_LENGTH -
-				    DEFAULT_FONT_SIZE / 2,
+				    DEFAULT_FONT_SIZE / 2 + shift_y,
 			    Black);
 
 	if (!tumGetTextSize((char *)our_string2, &our_string2_width, NULL))
 		tumDrawText(our_string2,
-			    SCREEN_WIDTH * 2 / 3 - our_string2_width / 2,
+			    SCREEN_WIDTH * 2 / 3 - our_string2_width / 2 + shift_x,
 			    SCREEN_HEIGHT / 2 + SQUARE_SIDE_LENGTH -
-				    DEFAULT_FONT_SIZE / 2,
+				    DEFAULT_FONT_SIZE / 2 + shift_y,
 			    Black);
 
 	// Let my_text4 move
@@ -328,7 +328,7 @@ void DrawText(unsigned count) {
 	
 	// printf("check %d \n" , my_text4->x);
 	if (!tumGetTextSize((char *)our_string4, &our_string4_width, NULL))
-		tumDrawText(my_text4->str, my_text4->x, my_text4->y,
+		tumDrawText(my_text4->str, my_text4->x + shift_x, my_text4->y + shift_y,
 			    my_text4->colour);		
 
 	// Let my_text3 move
@@ -338,7 +338,7 @@ void DrawText(unsigned count) {
 	
 
 	if (!tumGetTextSize((char *)our_string3, &our_string3_width, NULL))
-		tumDrawText(my_text3->str, my_text3->x, my_text3->y,
+		tumDrawText(my_text3->str, my_text3->x + shift_x, my_text3->y + shift_y,
 			    my_text3->colour);
 
 	
@@ -354,12 +354,55 @@ void clickMouseToResetButtons(button_t *button, unsigned short button_X,
 		static char buttonText[100];
 		static int buttonText_width = 0;
 		button->pressed_count = 0;
-		sprintf(buttonText, "Button %s is pressed %u times.",
-			button->name, button->pressed_count);
+		Handle_Debounce(button); // debounce input of button
+		sprintf(buttonText, "%s: %u |", button->name,
+			button->pressed_count);
 		if (!tumGetTextSize((char *)buttonText, &buttonText_width,
 				    NULL))
 			tumDrawText(buttonText, button_X, button_Y, Black);
 	}
+}
+
+typedef struct mouseInfo {
+	int mouseX; // The mouse's recent X coorde (in pixels)
+	int mouseY; // The mouse's recent Y coorde (in pixels)
+} mouseInfo_t;
+
+mouseInfo_t *createMouseInfo(int mouseX, int mouseY)
+{
+	mouseInfo_t *ret = calloc(1, sizeof(mouseInfo_t));
+	if (!ret) {
+		fprintf(stderr, "Create mouseInfo failed!");
+		exit(EXIT_FAILURE);
+	}
+
+	ret->mouseX = mouseX;
+	ret->mouseY = mouseY;
+	return ret;
+}
+
+void getMouseInfo(mouseInfo_t *mouse)
+{
+	mouse->mouseX = tumEventGetMouseX();
+	mouse->mouseY = tumEventGetMouseY();
+}
+
+void printMouseInfo(mouseInfo_t *mouse, unsigned short text_X, unsigned short text_Y)
+{
+	static char Text[100];
+	static int Text_width = 0;
+	getMouseInfo(mouse);
+
+	sprintf(Text, "Axis_X: %d |Axis_X: %d", mouse->mouseX,
+		mouse->mouseY);
+	if (!tumGetTextSize((char *)Text, &Text_width, NULL))
+		tumDrawText(Text, text_X, text_Y, Black);
+}
+
+void handle_coord(mouseInfo_t *mouse){
+	getMouseInfo(mouse);
+	mouse->mouseX = (mouse->mouseX -SCREEN_WIDTH/2)/10;
+	mouse->mouseY = (mouse->mouseY -SCREEN_HEIGHT/2)/10;
 }
 
 void vDemoTask(void *pvParameters)
@@ -377,7 +420,9 @@ void vDemoTask(void *pvParameters)
 	button_t *button_B = createButton("B", SDL_SCANCODE_B, 0, button_unpressed);
 	button_t *button_C = createButton("C", SDL_SCANCODE_C, 0, button_unpressed);
 	button_t *button_D = createButton("D", SDL_SCANCODE_D, 0, button_unpressed);
-	
+
+	mouseInfo_t  *mouse = createMouseInfo(0,0);
+	mouseInfo_t  *mouseToShift = createMouseInfo(0,0);
 
 	// Needed such that Gfx library knows which thread controlls drawing
 	// Only one thread can call tumDrawUpdateScreen while and thread can call
@@ -408,32 +453,47 @@ void vDemoTask(void *pvParameters)
 
 		tumDrawClear(White); // Clear screen
 
-		Handle_Button(button_A, buttonTextA_X, buttonTextA_Y);
-		Handle_Button(button_B, buttonTextB_X, buttonTextB_Y);
-		Handle_Button(button_C, buttonTextC_X, buttonTextC_Y);
-		Handle_Button(button_D, buttonTextD_X, buttonTextD_Y);
+		
+		handle_coord(mouseToShift);
 
-		clickMouseToResetButtons(button_A, buttonTextA_X, buttonTextA_Y);
-		clickMouseToResetButtons(button_B, buttonTextB_X, buttonTextB_Y);
-		clickMouseToResetButtons(button_C, buttonTextC_X, buttonTextC_Y);
-		clickMouseToResetButtons(button_D, buttonTextD_X, buttonTextD_Y);
+		printMouseInfo(mouse, mouseText_X + mouseToShift->mouseX,
+			       mouseText_Y + mouseToShift->mouseY);
+
+		coord_t points[3] = {
+			{ CORNER_1_X + mouseToShift->mouseX,
+			  CORNER_1_Y + mouseToShift->mouseY },
+			{ CORNER_2_X + mouseToShift->mouseX,
+			  CORNER_2_Y + mouseToShift->mouseY },
+			{ CORNER_3_X + mouseToShift->mouseX,
+			  CORNER_3_Y + mouseToShift->mouseY }
+		};
+
+		Handle_Button(button_A, buttonTextA_X + mouseToShift->mouseX, buttonTextA_Y + mouseToShift->mouseY);
+		Handle_Button(button_B, buttonTextB_X + mouseToShift->mouseX, buttonTextB_Y + mouseToShift->mouseY);
+		Handle_Button(button_C, buttonTextC_X + mouseToShift->mouseX, buttonTextC_Y + mouseToShift->mouseY);
+		Handle_Button(button_D, buttonTextD_X + mouseToShift->mouseX, buttonTextD_Y + mouseToShift->mouseY);
+
+		clickMouseToResetButtons(button_A, buttonTextA_X + mouseToShift->mouseX, buttonTextA_Y + mouseToShift->mouseY);
+		clickMouseToResetButtons(button_B, buttonTextB_X + mouseToShift->mouseX, buttonTextB_Y + mouseToShift->mouseY);
+		clickMouseToResetButtons(button_C, buttonTextC_X + mouseToShift->mouseX, buttonTextC_Y + mouseToShift->mouseY);
+		clickMouseToResetButtons(button_D, buttonTextD_X + mouseToShift->mouseX, buttonTextD_Y + mouseToShift->mouseY);
 
 		
 
-		// Handle the texts
-		DrawText(count);
+		// Draw some text
+		DrawText(count, mouseToShift->mouseX, mouseToShift->mouseY);
 
 		// Draw the triangle
 		tumDrawTriangle(points, Red);
 
 		// Let circle rotate around the triangle
 		updateCirclePosition(my_circle, count);
-		tumDrawCircle(my_circle->x, my_circle->y, my_circle->colour,
+		tumDrawCircle(my_circle->x + mouseToShift->mouseX, my_circle->y + mouseToShift->mouseY, my_circle->colour,
 			      my_circle->radius);
 
 		// Let circle rotate around the triangle
 		updateSquarePosition(my_square, count);
-		tumDrawFilledBox(my_square->x, my_square->y, my_square->w,
+		tumDrawFilledBox(my_square->x + mouseToShift->mouseX, my_square->y + mouseToShift->mouseY, my_square->w,
 				 my_square->h, my_square->colour);
 
 		tumDrawUpdateScreen(); // Refresh the screen to draw string
