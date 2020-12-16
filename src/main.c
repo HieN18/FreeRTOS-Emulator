@@ -23,6 +23,36 @@
 #define mainGENERIC_PRIORITY (tskIDLE_PRIORITY)
 #define mainGENERIC_STACK_SIZE ((unsigned short)2560)
 
+#define PRINT_TASK_ERROR(task) PRINT_ERROR("Failed to print task ##task");
+
+#define NEXT_TASK 0
+#define PREV_TASK 1
+
+#define STATE_ONE 0
+#define STATE_TWO 1
+
+#define STATE_COUNT 2
+
+#define STATE_QUEUE_LENGTH 1
+
+
+#define STARTING_STATE STATE_ONE
+
+#define portMAX_DELAY ( TickType_t ) 0xffffffffUL
+
+static TaskHandle_t BufferSwap = NULL;
+static TaskHandle_t StateMachine = NULL;
+static TaskHandle_t DemoTask1 = NULL;
+static TaskHandle_t DemoTask2 = NULL;
+
+const unsigned char next_state_signal = NEXT_TASK;
+const unsigned char prev_state_signal = PREV_TASK;
+
+static QueueHandle_t StateQueue = NULL;
+
+static SemaphoreHandle_t DrawSignal = NULL;
+static SemaphoreHandle_t ScreenLock = NULL;
+
 
 // Set time
 #define debounceDelay 50/1000
@@ -31,6 +61,12 @@
 #define CIRCLE_X SCREEN_WIDTH / 3
 #define CIRCLE_Y SCREEN_HEIGHT / 2
 #define CIRCLE_RADIUS 30
+
+#define CIRCLE_LEFT_X SCREEN_WIDTH / 3 +  SCREEN_WIDTH / 12
+#define CIRCLE_LEFT_Y SCREEN_HEIGHT / 2
+ 
+#define CIRCLE_RIGHT_X SCREEN_WIDTH * 2 / 3 -  SCREEN_WIDTH / 12
+#define CIRCLE_RIGHT_Y SCREEN_HEIGHT / 2
 
 // Set triangle
 #define TRIANGLE_SIDE_LENGTH 60
@@ -63,8 +99,6 @@
 
 
 #define KEYCODE(CHAR) SDL_SCANCODE_##CHAR
-
-static TaskHandle_t DemoTask = NULL;
 
 static long int lastDebounceTime = 0;
 static unsigned int reading = button_unpressed;
@@ -325,8 +359,7 @@ void DrawText(unsigned count, int shift_x, int shift_y) {
 	
 	updateTextPositionToLeft(
 		my_text4, (SCREEN_WIDTH * 2 / 3 - our_string4_width / 2), count);
-	
-	// printf("check %d \n" , my_text4->x);
+
 	if (!tumGetTextSize((char *)our_string4, &our_string4_width, NULL))
 		tumDrawText(my_text4->str, my_text4->x + shift_x, my_text4->y + shift_y,
 			    my_text4->colour);		
@@ -344,9 +377,6 @@ void DrawText(unsigned count, int shift_x, int shift_y) {
 	
 }
 
-// void Handle_Debounce(button_t *button_A, button_t *button_B, button_t *button_C,
-// 		     button_t *button_D)
-
 void clickMouseToResetButtons(button_t *button, unsigned short button_X,
 				      unsigned short button_Y)
 {
@@ -354,7 +384,6 @@ void clickMouseToResetButtons(button_t *button, unsigned short button_X,
 		static char buttonText[100];
 		static int buttonText_width = 0;
 		button->pressed_count = 0;
-		Handle_Debounce(button); // debounce input of button
 		sprintf(buttonText, "%s: %u |", button->name,
 			button->pressed_count);
 		if (!tumGetTextSize((char *)buttonText, &buttonText_width,
@@ -405,7 +434,117 @@ void handle_coord(mouseInfo_t *mouse){
 	mouse->mouseY = (mouse->mouseY -SCREEN_HEIGHT/2)/10;
 }
 
-void vDemoTask(void *pvParameters)
+static int vCheckStateInput(void)
+{
+    if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
+        if (buttons.buttons[KEYCODE(E)]) {
+            buttons.buttons[KEYCODE(E)] = 0;
+            if (StateQueue) {
+                xSemaphoreGive(buttons.lock);
+                xQueueSend(StateQueue, &next_state_signal, 0);
+                return 0;
+            }
+            return -1;
+        }
+        xSemaphoreGive(buttons.lock);
+    }
+
+    return 0;
+}
+
+void changeState(volatile unsigned char *state, unsigned char forwards)
+{
+    switch (forwards) {
+        case NEXT_TASK:
+            if (*state == STATE_COUNT - 1) {
+                *state = 0;
+            }
+            else {
+                (*state)++;
+            }
+            break;
+        case PREV_TASK:
+            if (*state == 0) {
+                *state = STATE_COUNT - 1;
+            }
+            else {
+                (*state)--;
+            }
+            break;
+        default:
+            break;
+    }
+}
+
+void vSwapBuffers(void *pvParameters)
+{
+    TickType_t xLastWakeTime;
+    xLastWakeTime = xTaskGetTickCount();
+    const TickType_t frameratePeriod = 20;
+
+    tumDrawBindThread(); // Setup Rendering handle with correct GL context
+
+    while (1) {
+        if (xSemaphoreTake(ScreenLock, portMAX_DELAY) == pdTRUE) {
+            tumDrawUpdateScreen();
+            tumEventFetchEvents(FETCH_EVENT_BLOCK);
+            xSemaphoreGive(ScreenLock);
+            xSemaphoreGive(DrawSignal);
+            vTaskDelayUntil(&xLastWakeTime,
+                            pdMS_TO_TICKS(frameratePeriod));
+        }
+    }
+}
+
+void basicSequentialStateMachine(void *pvParameters)
+{
+	unsigned char current_state = STARTING_STATE; // Default state
+	unsigned char state_changed = 1;
+	unsigned char input = 0;
+
+	while (1) {
+		if (state_changed) {
+			goto initial_state;
+		}
+		if (StateQueue)
+			if (xQueueReceive(StateQueue, &input, portMAX_DELAY) ==
+			    pdTRUE) {
+				changeState(&current_state, input);
+				state_changed = 1;
+			}
+
+	initial_state:
+		// Handle current state
+		if (state_changed) {
+			if (state_changed) {
+				switch (current_state) {
+				case STATE_ONE:
+					if (DemoTask2) {
+						vTaskSuspend(DemoTask2);
+					}
+					if (DemoTask1) {
+						vTaskResume(DemoTask1);
+					}
+					break;
+				case STATE_TWO:
+					if (DemoTask1) {
+						vTaskSuspend(DemoTask1);
+					}
+					if (DemoTask2) {
+						vTaskResume(DemoTask2);
+					}
+					break;
+				default:
+					break;
+				}
+				state_changed = 0;
+			}
+		}
+	}
+}
+
+
+void vDemoTask1(void *pvParameters)
 {
 	unsigned int count = 0;
 	circle_t *my_circle =
@@ -416,91 +555,157 @@ void vDemoTask(void *pvParameters)
 			     SCREEN_HEIGHT / 2 - SQUARE_SIDE_LENGTH / 2,
 			     SQUARE_SIDE_LENGTH, SQUARE_SIDE_LENGTH, Green);
 
-	button_t *button_A = createButton("A", SDL_SCANCODE_A, 0, button_unpressed);
-	button_t *button_B = createButton("B", SDL_SCANCODE_B, 0, button_unpressed);
-	button_t *button_C = createButton("C", SDL_SCANCODE_C, 0, button_unpressed);
-	button_t *button_D = createButton("D", SDL_SCANCODE_D, 0, button_unpressed);
+	button_t *button_A =
+		createButton("A", SDL_SCANCODE_A, 0, button_unpressed);
+	button_t *button_B =
+		createButton("B", SDL_SCANCODE_B, 0, button_unpressed);
+	button_t *button_C =
+		createButton("C", SDL_SCANCODE_C, 0, button_unpressed);
+	button_t *button_D =
+		createButton("D", SDL_SCANCODE_D, 0, button_unpressed);
 
-	mouseInfo_t  *mouse = createMouseInfo(0,0);
-	mouseInfo_t  *mouseToShift = createMouseInfo(0,0);
-
-	// Needed such that Gfx library knows which thread controlls drawing
-	// Only one thread can call tumDrawUpdateScreen while and thread can call
-	// the drawing functions to draw objects. This is a limitation of the SDL
-	// backend.
-	tumDrawBindThread();
+	mouseInfo_t *mouse = createMouseInfo(0, 0);
+	mouseInfo_t *mouseToShift = createMouseInfo(0, 0);
 
 	while (1) {
-		tumEventFetchEvents(
-			FETCH_EVENT_NONBLOCK); // Query events backend for new events, ie. button presses
+		if (DrawSignal)
+			if (xSemaphoreTake(DrawSignal, portMAX_DELAY) ==
+			    pdTRUE) {
+				tumEventFetchEvents(FETCH_EVENT_BLOCK |
+						    FETCH_EVENT_NO_GL_CHECK);
 
-		xGetButtonInput(); // Update global input
-		// Handle_Debounce(button_A, button_unpressed);
-		
-		
-		// printf("the time: %ld \n", (long int)the_time.tv_sec );
+				xGetButtonInput(); // Update global input
+				xSemaphoreTake(ScreenLock, portMAX_DELAY);
+				// if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
+				// 	if (buttons.buttons[KEYCODE(
+				// 		    Q)]) { // Equiv to SDL_SCANCODE_Q
+				// 		exit(EXIT_SUCCESS);
+				// 	}
+				// 	xSemaphoreGive(buttons.lock);
+				// }
 
-		// `buttons` is a global shared variable and as such needs to be
-		// guarded with a mutex, mutex must be obtained before accessing the
-		// resource and given back when you're finished. If the mutex is not
-		// given back then no other task can access the reseource.
-		if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
-			if (buttons.buttons[KEYCODE(Q)]) { // Equiv to SDL_SCANCODE_Q
-				exit(EXIT_SUCCESS);
+				tumDrawClear(White); // Clear screen
+
+				handle_coord(mouseToShift);
+
+				printMouseInfo(
+					mouse,
+					mouseText_X + mouseToShift->mouseX,
+					mouseText_Y + mouseToShift->mouseY);
+
+				coord_t points[3] = {
+					{ CORNER_1_X + mouseToShift->mouseX,
+					  CORNER_1_Y + mouseToShift->mouseY },
+					{ CORNER_2_X + mouseToShift->mouseX,
+					  CORNER_2_Y + mouseToShift->mouseY },
+					{ CORNER_3_X + mouseToShift->mouseX,
+					  CORNER_3_Y + mouseToShift->mouseY }
+				};
+
+				Handle_Button(
+					button_A,
+					buttonTextA_X + mouseToShift->mouseX,
+					buttonTextA_Y + mouseToShift->mouseY);
+				Handle_Button(
+					button_B,
+					buttonTextB_X + mouseToShift->mouseX,
+					buttonTextB_Y + mouseToShift->mouseY);
+				Handle_Button(
+					button_C,
+					buttonTextC_X + mouseToShift->mouseX,
+					buttonTextC_Y + mouseToShift->mouseY);
+				Handle_Button(
+					button_D,
+					buttonTextD_X + mouseToShift->mouseX,
+					buttonTextD_Y + mouseToShift->mouseY);
+
+				clickMouseToResetButtons(
+					button_A,
+					buttonTextA_X + mouseToShift->mouseX,
+					buttonTextA_Y + mouseToShift->mouseY);
+				clickMouseToResetButtons(
+					button_B,
+					buttonTextB_X + mouseToShift->mouseX,
+					buttonTextB_Y + mouseToShift->mouseY);
+				clickMouseToResetButtons(
+					button_C,
+					buttonTextC_X + mouseToShift->mouseX,
+					buttonTextC_Y + mouseToShift->mouseY);
+				clickMouseToResetButtons(
+					button_D,
+					buttonTextD_X + mouseToShift->mouseX,
+					buttonTextD_Y + mouseToShift->mouseY);
+
+				// Draw some text
+				DrawText(count, mouseToShift->mouseX,
+					 mouseToShift->mouseY);
+
+				// Draw the triangle
+				tumDrawTriangle(points, Red);
+
+				// Let circle rotate around the triangle
+				updateCirclePosition(my_circle, count);
+				tumDrawCircle(
+					my_circle->x + mouseToShift->mouseX,
+					my_circle->y + mouseToShift->mouseY,
+					my_circle->colour, my_circle->radius);
+
+				// Let circle rotate around the triangle
+				updateSquarePosition(my_square, count);
+				tumDrawFilledBox(
+					my_square->x + mouseToShift->mouseX,
+					my_square->y + mouseToShift->mouseY,
+					my_square->w, my_square->h,
+					my_square->colour);
+
+				// Basic sleep of 100 milliseconds
+
+				count++;
+				vTaskDelay((TickType_t)100);
+				xSemaphoreGive(ScreenLock);
+
+				vCheckStateInput();
 			}
-			xSemaphoreGive(buttons.lock);
-		}
+	}
+}
 
-		tumDrawClear(White); // Clear screen
+void vDemoTask2(void *pvParameters)
+{
+	circle_t *my_circle_left = createCircle(CIRCLE_LEFT_X, CIRCLE_LEFT_Y,
+						CIRCLE_RADIUS, TUMBlue);
 
-		
-		handle_coord(mouseToShift);
+	circle_t *my_circle_right = createCircle(CIRCLE_RIGHT_X, CIRCLE_RIGHT_Y,
+						 CIRCLE_RADIUS, Green);
+	while (1) {
+		if (DrawSignal)
+			if (xSemaphoreTake(DrawSignal, portMAX_DELAY) ==
+			    pdTRUE) {
+				xGetButtonInput();
+				xSemaphoreTake(ScreenLock, portMAX_DELAY);
+				if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
+					if (buttons.buttons[KEYCODE(
+						    Q)]) { // Equiv to SDL_SCANCODE_Q
+						exit(EXIT_SUCCESS);
+					}
+					xSemaphoreGive(buttons.lock);
+				}
 
-		printMouseInfo(mouse, mouseText_X + mouseToShift->mouseX,
-			       mouseText_Y + mouseToShift->mouseY);
+				tumDrawClear(White); // Clear screen
 
-		coord_t points[3] = {
-			{ CORNER_1_X + mouseToShift->mouseX,
-			  CORNER_1_Y + mouseToShift->mouseY },
-			{ CORNER_2_X + mouseToShift->mouseX,
-			  CORNER_2_Y + mouseToShift->mouseY },
-			{ CORNER_3_X + mouseToShift->mouseX,
-			  CORNER_3_Y + mouseToShift->mouseY }
-		};
+				// Let circle rotate around the triangle
+				tumDrawCircle(my_circle_left->x,
+					      my_circle_left->y,
+					      my_circle_left->colour,
+					      my_circle_left->radius);
+				tumDrawCircle(my_circle_right->x,
+					      my_circle_right->y,
+					      my_circle_right->colour,
+					      my_circle_right->radius);
 
-		Handle_Button(button_A, buttonTextA_X + mouseToShift->mouseX, buttonTextA_Y + mouseToShift->mouseY);
-		Handle_Button(button_B, buttonTextB_X + mouseToShift->mouseX, buttonTextB_Y + mouseToShift->mouseY);
-		Handle_Button(button_C, buttonTextC_X + mouseToShift->mouseX, buttonTextC_Y + mouseToShift->mouseY);
-		Handle_Button(button_D, buttonTextD_X + mouseToShift->mouseX, buttonTextD_Y + mouseToShift->mouseY);
+				xSemaphoreGive(ScreenLock);
 
-		clickMouseToResetButtons(button_A, buttonTextA_X + mouseToShift->mouseX, buttonTextA_Y + mouseToShift->mouseY);
-		clickMouseToResetButtons(button_B, buttonTextB_X + mouseToShift->mouseX, buttonTextB_Y + mouseToShift->mouseY);
-		clickMouseToResetButtons(button_C, buttonTextC_X + mouseToShift->mouseX, buttonTextC_Y + mouseToShift->mouseY);
-		clickMouseToResetButtons(button_D, buttonTextD_X + mouseToShift->mouseX, buttonTextD_Y + mouseToShift->mouseY);
-
-		
-
-		// Draw some text
-		DrawText(count, mouseToShift->mouseX, mouseToShift->mouseY);
-
-		// Draw the triangle
-		tumDrawTriangle(points, Red);
-
-		// Let circle rotate around the triangle
-		updateCirclePosition(my_circle, count);
-		tumDrawCircle(my_circle->x + mouseToShift->mouseX, my_circle->y + mouseToShift->mouseY, my_circle->colour,
-			      my_circle->radius);
-
-		// Let circle rotate around the triangle
-		updateSquarePosition(my_square, count);
-		tumDrawFilledBox(my_square->x + mouseToShift->mouseX, my_square->y + mouseToShift->mouseY, my_square->w,
-				 my_square->h, my_square->colour);
-
-		tumDrawUpdateScreen(); // Refresh the screen to draw string
-
-		// Basic sleep of 100 milliseconds
-		count++;
-		vTaskDelay((TickType_t)100);
+				vCheckStateInput();
+			}
 	}
 }
 
@@ -531,25 +736,60 @@ int main(int argc, char *argv[])
 		goto err_buttons_lock;
 	}
 
-	if (xTaskCreate(vDemoTask, "DemoTask", mainGENERIC_STACK_SIZE * 2, NULL,
-			mainGENERIC_PRIORITY, &DemoTask) != pdPASS) {
-		goto err_demotask;
+	DrawSignal = xSemaphoreCreateBinary(); // Screen buffer locking
+	if (!DrawSignal) {
+		PRINT_ERROR("Failed to create draw signal");
+	}
+
+	ScreenLock = xSemaphoreCreateMutex();
+    if (!ScreenLock) {
+        PRINT_ERROR("Failed to create screen lock");
+    }
+
+	StateQueue = xQueueCreate(STATE_QUEUE_LENGTH, sizeof(unsigned char));
+    if (!StateQueue) {
+        PRINT_ERROR("Could not open state queue");
+        goto err_state_queue;
+    }
+
+	if (xTaskCreate(vSwapBuffers, "BufferSwapTask",
+                    mainGENERIC_STACK_SIZE * 2, NULL, configMAX_PRIORITIES,
+                    BufferSwap) != pdPASS) {
+        PRINT_TASK_ERROR("BufferSwapTask");
+    }
+
+	if (xTaskCreate(basicSequentialStateMachine, "StateMachine",
+                    mainGENERIC_STACK_SIZE * 2, NULL,
+                    configMAX_PRIORITIES - 1, &StateMachine) != pdPASS) {
+        PRINT_TASK_ERROR("StateMachine");
+    }
+
+	if (xTaskCreate(vDemoTask1, "DemoTask1", mainGENERIC_STACK_SIZE * 2, NULL,
+			mainGENERIC_PRIORITY, &DemoTask1) != pdPASS) {
+		PRINT_TASK_ERROR("DemoTask1");
+		goto err_demotask1;
+	}if (xTaskCreate(vDemoTask2, "DemoTask2", mainGENERIC_STACK_SIZE * 2, NULL,
+			mainGENERIC_PRIORITY, &DemoTask2) != pdPASS) {
+		PRINT_TASK_ERROR("DemoTask2");
 	}
 
 	vTaskStartScheduler();
 
 	return EXIT_SUCCESS;
 
-err_demotask:
+err_demotask1:
 	vSemaphoreDelete(buttons.lock);
 err_buttons_lock:
 	tumSoundExit();
+err_state_queue:
+    vSemaphoreDelete(ScreenLock);
 err_init_audio:
 	tumEventExit();
 err_init_events:
 	tumDrawExit();
 err_init_drawing:
 	return EXIT_FAILURE;
+
 }
 
 // cppcheck-suppress unusedFunction
