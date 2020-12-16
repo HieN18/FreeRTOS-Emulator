@@ -43,7 +43,13 @@
 static TaskHandle_t BufferSwap = NULL;
 static TaskHandle_t StateMachine = NULL;
 static TaskHandle_t DemoTask1 = NULL;
-static TaskHandle_t DemoTask2 = NULL;
+static TaskHandle_t DemoTask2a = NULL;
+static TaskHandle_t DemoTask2b = NULL;
+
+#define STACK_SIZE 200
+
+StackType_t xStack[ STACK_SIZE ];
+StaticTask_t xTaskBuffer;
 
 const unsigned char next_state_signal = NEXT_TASK;
 const unsigned char prev_state_signal = PREV_TASK;
@@ -488,7 +494,7 @@ void vSwapBuffers(void *pvParameters)
 {
     TickType_t xLastWakeTime;
     xLastWakeTime = xTaskGetTickCount();
-    const TickType_t frameratePeriod = 20;
+    const TickType_t frameratePeriod = 50;
 
     tumDrawBindThread(); // Setup Rendering handle with correct GL context
 
@@ -527,8 +533,9 @@ void basicSequentialStateMachine(void *pvParameters)
 			if (state_changed) {
 				switch (current_state) {
 				case STATE_ONE:
-					if (DemoTask2) {
-						vTaskSuspend(DemoTask2);
+					if (DemoTask2a) {
+						vTaskSuspend(DemoTask2a);
+						vTaskSuspend(DemoTask2b);
 					}
 					if (DemoTask1) {
 						vTaskResume(DemoTask1);
@@ -538,8 +545,9 @@ void basicSequentialStateMachine(void *pvParameters)
 					if (DemoTask1) {
 						vTaskSuspend(DemoTask1);
 					}
-					if (DemoTask2) {
-						vTaskResume(DemoTask2);
+					if (DemoTask2a) {
+						vTaskResume(DemoTask2a);
+						vTaskResume(DemoTask2b);
 					}
 					break;
 				default:
@@ -584,13 +592,13 @@ void vDemoTask1(void *pvParameters)
 
 				xGetButtonInput(); // Update global input
 				xSemaphoreTake(ScreenLock, portMAX_DELAY);
-				// if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
-				// 	if (buttons.buttons[KEYCODE(
-				// 		    Q)]) { // Equiv to SDL_SCANCODE_Q
-				// 		exit(EXIT_SUCCESS);
-				// 	}
-				// 	xSemaphoreGive(buttons.lock);
-				// }
+				if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
+					if (buttons.buttons[KEYCODE(
+						    Q)]) { // Equiv to SDL_SCANCODE_Q
+						exit(EXIT_SUCCESS);
+					}
+					xSemaphoreGive(buttons.lock);
+				}
 
 				tumDrawClear(White); // Clear screen
 
@@ -679,27 +687,42 @@ void vDemoTask1(void *pvParameters)
 	}
 }
 
-void vDemoTask2(void *pvParameters)
+
+
+void vApplicationGetIdleTaskMemory( StaticTask_t **ppxIdleTaskTCBBuffer,
+                                    StackType_t **ppxIdleTaskStackBuffer,
+                                    uint32_t *pulIdleTaskStackSize )
+{
+/* If the buffers to be provided to the Idle task are declared inside this
+function then they must be declared static – otherwise they will be allocated on
+the stack and so not exists after this function exits. */
+static StaticTask_t xIdleTaskTCB;
+static StackType_t uxIdleTaskStack[ configMINIMAL_STACK_SIZE ];
+
+    /* Pass out a pointer to the StaticTask_t structure in which the Idle task’s
+    state will be stored. */
+    *ppxIdleTaskTCBBuffer = &xIdleTaskTCB;
+
+    /* Pass out the array that will be used as the Idle task’s stack. */
+    *ppxIdleTaskStackBuffer = uxIdleTaskStack;
+
+    /* Pass out the size of the array pointed to by *ppxIdleTaskStackBuffer.
+    Note that, as the array is necessarily of type StackType_t,
+    configMINIMAL_STACK_SIZE is specified in words, not bytes. */
+    *pulIdleTaskStackSize = configMINIMAL_STACK_SIZE;
+}
+
+void vDemoTask2a(void *pvParameters)
 {
 	circle_t *my_circle_left = createCircle(CIRCLE_LEFT_X, CIRCLE_LEFT_Y,
 						CIRCLE_RADIUS, TUMBlue);
 
-	circle_t *my_circle_right = createCircle(CIRCLE_RIGHT_X, CIRCLE_RIGHT_Y,
-						 CIRCLE_RADIUS, Green);
 	while (1) {
 		if (DrawSignal)
 			if (xSemaphoreTake(DrawSignal, portMAX_DELAY) ==
 			    pdTRUE) {
 				xGetButtonInput();
 				xSemaphoreTake(ScreenLock, portMAX_DELAY);
-				if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
-					if (buttons.buttons[KEYCODE(
-						    Q)]) { // Equiv to SDL_SCANCODE_Q
-						exit(EXIT_SUCCESS);
-					}
-					xSemaphoreGive(buttons.lock);
-				}
-
 				tumDrawClear(White); // Clear screen
 
 				DrawInfoText(0,0);
@@ -709,13 +732,36 @@ void vDemoTask2(void *pvParameters)
 					      my_circle_left->y,
 					      my_circle_left->colour,
 					      my_circle_left->radius);
+
+				xSemaphoreGive(ScreenLock);
+				vTaskDelay(500 / portTICK_RATE_MS);
+				vCheckStateInput();
+			}
+	}
+}
+
+void vDemoTask2b(void *pvParameters)
+{
+	circle_t *my_circle_right = createCircle(CIRCLE_RIGHT_X, CIRCLE_RIGHT_Y,
+						 CIRCLE_RADIUS, Green);
+	while (1) {
+		if (DrawSignal)
+			if (xSemaphoreTake(DrawSignal, portMAX_DELAY) ==
+			    pdTRUE) {
+				xGetButtonInput();
+				xSemaphoreTake(ScreenLock, portMAX_DELAY);
+				tumDrawClear(White); // Clear screen
+
+				DrawInfoText(0,0);
+
+				// Let circle rotate around the triangle
 				tumDrawCircle(my_circle_right->x,
 					      my_circle_right->y,
 					      my_circle_right->colour,
 					      my_circle_right->radius);
 
 				xSemaphoreGive(ScreenLock);
-
+				vTaskDelay( 250 / portTICK_RATE_MS);
 				vCheckStateInput();
 			}
 	}
@@ -774,15 +820,19 @@ int main(int argc, char *argv[])
                     mainGENERIC_STACK_SIZE * 2, NULL,
                     configMAX_PRIORITIES - 1, &StateMachine) != pdPASS) {
         PRINT_TASK_ERROR("StateMachine");
-    }
+	}
 
-	if (xTaskCreate(vDemoTask1, "DemoTask1", mainGENERIC_STACK_SIZE * 2, NULL,
-			mainGENERIC_PRIORITY, &DemoTask1) != pdPASS) {
+	if (xTaskCreate(vDemoTask1, "DemoTask1", mainGENERIC_STACK_SIZE * 2,
+			NULL, configMAX_PRIORITIES, &DemoTask1) != pdPASS) {
 		PRINT_TASK_ERROR("DemoTask1");
 		goto err_demotask1;
-	}if (xTaskCreate(vDemoTask2, "DemoTask2", mainGENERIC_STACK_SIZE * 2, NULL,
-			mainGENERIC_PRIORITY, &DemoTask2) != pdPASS) {
-		PRINT_TASK_ERROR("DemoTask2");
+	}
+	DemoTask2a = xTaskCreateStatic(vDemoTask2a, "DemoTask2a",
+				       STACK_SIZE, NULL,
+				       configMAX_PRIORITIES - 1, xStack, &xTaskBuffer);
+	if (xTaskCreate(vDemoTask2b, "DemoTask2b", mainGENERIC_STACK_SIZE * 2,
+			NULL, configMAX_PRIORITIES - 1 , &DemoTask2b) != pdPASS) {
+		PRINT_TASK_ERROR("DemoTask2b");
 	}
 
 	vTaskStartScheduler();

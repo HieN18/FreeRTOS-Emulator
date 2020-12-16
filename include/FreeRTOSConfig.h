@@ -103,6 +103,9 @@
 #define INCLUDE_uxTaskGetStackHighWaterMark 0 /* Do not use this option on the PC port. */
 #define INCLUDE_xTaskGetSchedulerState      1
 
+#define configSUPPORT_STATIC_ALLOCATION         1
+
+
 extern void vMainQueueSendPassed(void);
 #define traceQUEUE_SEND( pxQueue ) vMainQueueSendPassed()
 
