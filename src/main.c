@@ -86,16 +86,19 @@ static SemaphoreHandle_t ScreenLock = NULL;
 
 
 #define buttonTextA_X 20
-#define buttonTextA_Y 50
+#define buttonTextA_Y 40
 #define buttonTextB_X 80
-#define buttonTextB_Y 50
+#define buttonTextB_Y 40
 #define buttonTextC_X 140
-#define buttonTextC_Y 50
+#define buttonTextC_Y 40
 #define buttonTextD_X 200
-#define buttonTextD_Y 50
+#define buttonTextD_Y 40
+
+#define infoText_X 420
+#define infoText_Y 20
 
 #define mouseText_X 20
-#define mouseText_Y 30
+#define mouseText_Y 20
 
 
 #define KEYCODE(CHAR) SDL_SCANCODE_##CHAR
@@ -313,9 +316,14 @@ void Handle_Button(button_t *button, unsigned short button_X, unsigned short but
 		tumDrawText(buttonText, button_X, button_Y, Black);
 }
 
-
-
-
+void DrawInfoText(int shift_x, int shift_y) {
+	static char our_string[100];
+	static int our_string_width = 0;
+	sprintf(our_string, "[Q] to [Q]uit | [E] to Chang[e]");
+	if (!tumGetTextSize((char *)our_string, &our_string_width, NULL))
+		tumDrawText(our_string, infoText_X + shift_x,
+			    infoText_Y + shift_y, Red);
+}
 
 void DrawText(unsigned count, int shift_x, int shift_y) {
 	
@@ -588,6 +596,8 @@ void vDemoTask1(void *pvParameters)
 
 				handle_coord(mouseToShift);
 
+				DrawInfoText(mouseToShift->mouseX,mouseToShift->mouseY);
+
 				printMouseInfo(
 					mouse,
 					mouseText_X + mouseToShift->mouseX,
@@ -691,6 +701,8 @@ void vDemoTask2(void *pvParameters)
 				}
 
 				tumDrawClear(White); // Clear screen
+
+				DrawInfoText(0,0);
 
 				// Let circle rotate around the triangle
 				tumDrawCircle(my_circle_left->x,
