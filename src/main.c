@@ -10,6 +10,7 @@
 #include "queue.h"
 #include "semphr.h"
 #include "task.h"
+#include "timers.h"
 
 #include "TUM_Ball.h"
 #include "TUM_Draw.h"
@@ -25,56 +26,30 @@
 
 #define PRINT_TASK_ERROR(task) PRINT_ERROR("Failed to print task ##task");
 
+#define STACK_SIZE 200
+
+#define KEYCODE(CHAR) SDL_SCANCODE_##CHAR
+
 #define NEXT_TASK 0
 #define PREV_TASK 1
 
+// Set all states
 #define STATE_ONE 0
 #define STATE_TWO 1
-
 #define STATE_COUNT 2
-
 #define STATE_QUEUE_LENGTH 1
-
-
 #define STARTING_STATE STATE_ONE
 
-#define portMAX_DELAY ( TickType_t ) 0xffffffffUL
-
-static TaskHandle_t BufferSwap = NULL;
-static TaskHandle_t StateMachine = NULL;
-static TaskHandle_t DrawTask1 = NULL;
-static TaskHandle_t DrawTask2a = NULL;
-static TaskHandle_t DrawTask2b = NULL;
-static TaskHandle_t ButtonTask3a = NULL;
-static TaskHandle_t ButtonTask3b = NULL;
-// static TaskHandle_t ButtonTask4 = NULL;
-
-#define STACK_SIZE 200
-
-StackType_t xStack[ STACK_SIZE ];
-StaticTask_t xTaskBuffer;
-
-const unsigned char next_state_signal = NEXT_TASK;
-const unsigned char prev_state_signal = PREV_TASK;
-
-static QueueHandle_t StateQueue = NULL;
-
-static SemaphoreHandle_t DrawSignal = NULL;
-static SemaphoreHandle_t ScreenLock = NULL;
-
-
 // Set time
-#define debounceDelay 50/1000
+#define DEBOUNCE_DELAY 50 / 1000
 
 // Set circle
 #define CIRCLE_X SCREEN_WIDTH / 3
 #define CIRCLE_Y SCREEN_HEIGHT / 2
 #define CIRCLE_RADIUS 30
-
-#define CIRCLE_LEFT_X SCREEN_WIDTH / 3 +  SCREEN_WIDTH / 12
+#define CIRCLE_LEFT_X SCREEN_WIDTH / 3 + SCREEN_WIDTH / 12
 #define CIRCLE_LEFT_Y SCREEN_HEIGHT / 2
- 
-#define CIRCLE_RIGHT_X SCREEN_WIDTH * 2 / 3 -  SCREEN_WIDTH / 12
+#define CIRCLE_RIGHT_X SCREEN_WIDTH * 2 / 3 - SCREEN_WIDTH / 12
 #define CIRCLE_RIGHT_Y SCREEN_HEIGHT / 2
 
 // Set triangle
@@ -90,50 +65,76 @@ static SemaphoreHandle_t ScreenLock = NULL;
 #define SQUARE_SIDE_LENGTH 50
 
 // Set button
-#define button_pressed 1
-#define button_unpressed 0
+#define BUTTON_PRESSED 1
+#define BUTTON_UNPRESSED 0
 
+// Set coord for buttons
+#define BUTTON_TEXT_A_X 20
+#define BUTTON_TEXT_A_Y 40
+#define BUTTON_TEXT_B_X 80
+#define BUTTON_TEXT_B_Y 40
+#define BUTTON_TEXT_C_X 140
+#define BUTTON_TEXT_C_Y 40
+#define BUTTON_TEXT_D_X 200
+#define BUTTON_TEXT_D_Y 40
+#define BUTTON_TEXT_T_X 440
+#define BUTTON_TEXT_T_Y 60
+#define BUTTON_TEXT_U_X 490
+#define BUTTON_TEXT_U_Y 60
 
-#define buttonTextA_X 20
-#define buttonTextA_Y 40
-#define buttonTextB_X 80
-#define buttonTextB_Y 40
-#define buttonTextC_X 140
-#define buttonTextC_Y 40
-#define buttonTextD_X 200
-#define buttonTextD_Y 40
+// Set coord for text to draw
+#define INFO_TEXT_X 420
+#define INFO_TEXT_Y 20
+#define INFO_TASK3_X 320
+#define INFO_TASK3_Y 40
+#define INFO_TASK4_X 320
+#define INFO_TASK4_Y 80
+#define MOUSE_TEXT_X 20
+#define MOUSE_TEXT_Y 20
+#define RESET_TEXT_X 320
+#define RESET_TEXT_Y 60
 
-#define buttonTextT_X 420
-#define buttonTextT_Y 60
-#define buttonTextU_X 480
-#define buttonTextU_Y 60
+// Task handle
+static TaskHandle_t BufferSwap = NULL;
+static TaskHandle_t StateMachine = NULL;
+static TaskHandle_t DrawTask1 = NULL;
+static TaskHandle_t DrawTask2a = NULL;
+static TaskHandle_t DrawTask2b = NULL;
+static TaskHandle_t ButtonTask3a = NULL;
+static TaskHandle_t ButtonTask3b = NULL;
+static TimerHandle_t ResetButtonNum15sec = NULL;
 
-#define infoText_X 420
-#define infoText_Y 20
+// static TaskHandle_t ButtonTask4 = NULL;
 
-#define infoTask3_X 320
-#define infoTask3_Y 40
+StackType_t xStack[STACK_SIZE];
+StaticTask_t xTaskBuffer;
 
-#define infoTask4_X 320
-#define infoTask4_Y 80
+const unsigned char next_state_signal = NEXT_TASK;
+const unsigned char prev_state_signal = PREV_TASK;
 
-#define mouseText_X 20
-#define mouseText_Y 20
+static QueueHandle_t StateQueue = NULL;
 
+static SemaphoreHandle_t DrawSignal = NULL;
+static SemaphoreHandle_t ScreenLock = NULL;
+static SemaphoreHandle_t Button_T_Signal = NULL;
+static SemaphoreHandle_t Button_U_Signal = NULL;
+static SemaphoreHandle_t Reset15sec_T_Signal = NULL;
+static SemaphoreHandle_t Reset15sec_U_Signal = NULL;
 
-#define KEYCODE(CHAR) SDL_SCANCODE_##CHAR
 
 static long int lastDebounceTime = 0;
-static unsigned int reading = button_unpressed;
+static unsigned int reading = BUTTON_UNPRESSED;
 
+/*=======================FUNCTION========================*/
 typedef struct circle {
 	signed short x; /**< X pixel coord of ball on screen */
 	signed short y; /**< Y pixel coord of ball on screen */
+	unsigned short radius; /**< Radius of the ball in pixels */
 	unsigned int colour; /**< Hex RGB colour of the ball */
-	signed short radius; /**< Radius of the ball in pixels */
 } circle_t;
+
 circle_t *createCircle(signed short initial_x, signed short initial_y,
-		       unsigned int colour, signed short radius)
+		       unsigned short radius, unsigned int colour)
 {
 	circle_t *ret = calloc(1, sizeof(circle_t));
 
@@ -144,8 +145,8 @@ circle_t *createCircle(signed short initial_x, signed short initial_y,
 
 	ret->x = initial_x;
 	ret->y = initial_y;
-	ret->colour = colour;
 	ret->radius = radius;
+	ret->colour = colour;
 
 	return ret;
 }
@@ -240,17 +241,11 @@ void updateTextPositionToLeft(text_t *text, signed int position_x,
 void updateTextPositionToRight(text_t *text, signed int position_x,
 			       unsigned int count)
 {
-	static int text_width = 0;
 	float update_interval = count % 360 * 2 / (2 * M_PI);
-	if (!tumGetTextSize((char *)text, &text_width, NULL)) {
-		text->x = position_x +
-			  (SCREEN_WIDTH / 6 -
-			   (SCREEN_WIDTH / 6) * cos(update_interval));
-	}
+	text->x = position_x + (SCREEN_WIDTH / 6 -
+				(SCREEN_WIDTH / 6) * cos(update_interval));
 	text->x = round(text->x);
 }
-
-
 
 typedef struct button {
 	char *name;
@@ -259,7 +254,8 @@ typedef struct button {
 	unsigned int state;
 } button_t;
 
-button_t *createButton(char *name, unsigned int SDL_CODE_NUM, unsigned int count, unsigned int state)
+button_t *createButton(char *name, unsigned int SDL_CODE_NUM,
+		       unsigned int count, unsigned int state)
 {
 	button_t *ret = calloc(1, sizeof(button_t));
 	if (!ret) {
@@ -292,7 +288,7 @@ void xGetButtonInput(void)
 void updatePressedCount(button_t *button)
 {
 	if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
-		if (button->state == button_pressed) {
+		if (button->state == BUTTON_PRESSED) {
 			button->pressed_count += 1;
 		}
 		xSemaphoreGive(buttons.lock);
@@ -304,19 +300,18 @@ void Handle_Debounce(button_t *button)
 	static struct timespec the_time;
 	clock_gettime(CLOCK_REALTIME,
 		      &the_time); // Get kernel real time
-	if(xSemaphoreTake(buttons.lock, 0) == pdTRUE)
-	{
+	if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
 		if (buttons.buttons[button->SDL_CODE_NUM]) {
-			reading = button_pressed;
+			reading = BUTTON_PRESSED;
 		} else {
-			reading = button_unpressed;
+			reading = BUTTON_UNPRESSED;
 		}
 		xSemaphoreGive(buttons.lock);
 	}
 	if (reading != button->state) {
 		lastDebounceTime = the_time.tv_sec;
 	}
-	if ((the_time.tv_sec - lastDebounceTime) >= debounceDelay) {
+	if ((the_time.tv_sec - lastDebounceTime) >= DEBOUNCE_DELAY) {
 		if (reading != button->state) {
 			button->state = reading;
 			updatePressedCount(button);
@@ -324,38 +319,49 @@ void Handle_Debounce(button_t *button)
 	}
 }
 
-void Handle_Button(button_t *button, unsigned short button_X, unsigned short button_Y)
+void Handle_Button(button_t *button, unsigned short button_X,
+		   unsigned short button_Y)
 {
 	static char buttonText[100];
 	static int buttonText_width = 0;
 	Handle_Debounce(button); // debounce input of button
 
-	sprintf(buttonText, "%s: %u |", button->name,
-		button->pressed_count);
+	sprintf(buttonText, "%s: %u |", button->name, button->pressed_count);
 	if (!tumGetTextSize((char *)buttonText, &buttonText_width, NULL))
 		tumDrawText(buttonText, button_X, button_Y, Black);
 }
 
-void DrawInfoText(int shift_x, int shift_y) {
+void DrawInfoText(int shift_x, int shift_y)
+{
 	static char our_string[100];
 	static int our_string_width = 0;
 	sprintf(our_string, "[Q] to [Q]uit | [E] to Chang[e]");
 	if (!tumGetTextSize((char *)our_string, &our_string_width, NULL))
-		tumDrawText(our_string, infoText_X + shift_x,
-			    infoText_Y + shift_y, Red);
+		tumDrawText(our_string, INFO_TEXT_X + shift_x,
+			    INFO_TEXT_Y + shift_y, Red);
 }
 
-void DrawInfoTask3() {
+void DrawInfoTask3()
+{
 	static char our_string[100];
 	static int our_string_width = 0;
 	sprintf(our_string, "[T] to count number T | [U] to count number U");
 	if (!tumGetTextSize((char *)our_string, &our_string_width, NULL))
-		tumDrawText(our_string, infoTask3_X,
-			    infoTask3_Y, Red);
+		tumDrawText(our_string, INFO_TASK3_X, INFO_TASK3_Y, Red);
 }
 
-void DrawText(unsigned count, int shift_x, int shift_y) {
-	
+void DrawResetText()
+{
+	static char our_string[100];
+	static int our_string_width = 0;
+	sprintf(our_string, "(Reset after 15s)");
+	if (!tumGetTextSize((char *)our_string, &our_string_width, NULL))
+		tumDrawText(our_string, RESET_TEXT_X, RESET_TEXT_Y, Red);
+}
+
+
+void DrawText(unsigned count, int shift_x, int shift_y)
+{
 	static char our_string1[100];
 	static char our_string2[100];
 	static int our_string1_width = 0;
@@ -387,35 +393,33 @@ void DrawText(unsigned count, int shift_x, int shift_y) {
 
 	if (!tumGetTextSize((char *)our_string2, &our_string2_width, NULL))
 		tumDrawText(our_string2,
-			    SCREEN_WIDTH * 2 / 3 - our_string2_width / 2 + shift_x,
+			    SCREEN_WIDTH * 2 / 3 - our_string2_width / 2 +
+				    shift_x,
 			    SCREEN_HEIGHT / 2 + SQUARE_SIDE_LENGTH -
 				    DEFAULT_FONT_SIZE / 2 + shift_y,
 			    Black);
 
 	// Let my_text4 move
-	
-	updateTextPositionToLeft(
-		my_text4, (SCREEN_WIDTH * 2 / 3 - our_string4_width / 2), count);
+
+	updateTextPositionToLeft(my_text4,
+				 (SCREEN_WIDTH * 2 / 3 - our_string4_width / 2),
+				 count);
 
 	if (!tumGetTextSize((char *)our_string4, &our_string4_width, NULL))
-		tumDrawText(my_text4->str, my_text4->x + shift_x, my_text4->y + shift_y,
-			    my_text4->colour);		
+		tumDrawText(my_text4->str, my_text4->x + shift_x,
+			    my_text4->y + shift_y, my_text4->colour);
 
 	// Let my_text3 move
 	updateTextPositionToRight(
 		my_text3, SCREEN_WIDTH / 3 - our_string3_width / 2, count);
 
-	
-
 	if (!tumGetTextSize((char *)our_string3, &our_string3_width, NULL))
-		tumDrawText(my_text3->str, my_text3->x + shift_x, my_text3->y + shift_y,
-			    my_text3->colour);
-
-	
+		tumDrawText(my_text3->str, my_text3->x + shift_x,
+			    my_text3->y + shift_y, my_text3->colour);
 }
 
 void clickMouseToResetButtons(button_t *button, unsigned short button_X,
-				      unsigned short button_Y)
+			      unsigned short button_Y)
 {
 	if (tumEventGetMouseLeft()) {
 		static char buttonText[100];
@@ -453,84 +457,87 @@ void getMouseInfo(mouseInfo_t *mouse)
 	mouse->mouseY = tumEventGetMouseY();
 }
 
-void printMouseInfo(mouseInfo_t *mouse, unsigned short text_X, unsigned short text_Y)
+void printMouseInfo(mouseInfo_t *mouse, unsigned short text_X,
+		    unsigned short text_Y)
 {
 	static char Text[100];
 	static int Text_width = 0;
 	getMouseInfo(mouse);
 
-	sprintf(Text, "Axis_X: %d |Axis_X: %d", mouse->mouseX,
-		mouse->mouseY);
+	sprintf(Text, "Axis_X: %d |Axis_X: %d", mouse->mouseX, mouse->mouseY);
 	if (!tumGetTextSize((char *)Text, &Text_width, NULL))
 		tumDrawText(Text, text_X, text_Y, Black);
 }
 
-void handle_coord(mouseInfo_t *mouse){
+void handle_coord(mouseInfo_t *mouse)
+{
 	getMouseInfo(mouse);
-	mouse->mouseX = (mouse->mouseX -SCREEN_WIDTH/2)/10;
-	mouse->mouseY = (mouse->mouseY -SCREEN_HEIGHT/2)/10;
+	mouse->mouseX = (mouse->mouseX - SCREEN_WIDTH / 2) / 10;
+	mouse->mouseY = (mouse->mouseY - SCREEN_HEIGHT / 2) / 10;
 }
 
 static int vCheckStateInput(void)
 {
-    if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
-        if (buttons.buttons[KEYCODE(E)]) {
-            buttons.buttons[KEYCODE(E)] = 0;
-            if (StateQueue) {
-                xSemaphoreGive(buttons.lock);
-                xQueueSend(StateQueue, &next_state_signal, 0);
-                return 0;
-            }
-            return -1;
-        }
-        xSemaphoreGive(buttons.lock);
-    }
+	if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
+		if (buttons.buttons[KEYCODE(E)]) {
+			buttons.buttons[KEYCODE(E)] = 0;
+			if (StateQueue) {
+				xSemaphoreGive(buttons.lock);
+				xQueueSend(StateQueue, &next_state_signal, 0);
+				return 0;
+			}
+			return -1;
+		}
+		xSemaphoreGive(buttons.lock);
+	}
 
-    return 0;
+	return 0;
 }
 
 void changeState(volatile unsigned char *state, unsigned char forwards)
 {
-    switch (forwards) {
-        case NEXT_TASK:
-            if (*state == STATE_COUNT - 1) {
-                *state = 0;
-            }
-            else {
-                (*state)++;
-            }
-            break;
-        case PREV_TASK:
-            if (*state == 0) {
-                *state = STATE_COUNT - 1;
-            }
-            else {
-                (*state)--;
-            }
-            break;
-        default:
-            break;
-    }
+	switch (forwards) {
+	case NEXT_TASK:
+		if (*state == STATE_COUNT - 1) {
+			*state = 0;
+		} else {
+			(*state)++;
+		}
+		break;
+	case PREV_TASK:
+		if (*state == 0) {
+			*state = STATE_COUNT - 1;
+		} else {
+			(*state)--;
+		}
+		break;
+	default:
+		break;
+	}
 }
 
+/*=========================TASKS==========================*/
+void vTimerCallbackReset15sec (xTimerHandle pxTimer) {
+	xSemaphoreGive(Reset15sec_T_Signal);
+	xSemaphoreGive(Reset15sec_U_Signal);
+}
 void vSwapBuffers(void *pvParameters)
 {
-    TickType_t xLastWakeTime;
-    xLastWakeTime = xTaskGetTickCount();
-    const TickType_t frameratePeriod = 50;
-    tumDrawBindThread(); // Setup Rendering handle with correct GL context
+	TickType_t xLastWakeTime;
+	xLastWakeTime = xTaskGetTickCount();
+	const TickType_t frameratePeriod = 50;
+	tumDrawBindThread(); // Setup Rendering handle with correct GL context
 
-
-    while (1) {
-        if (xSemaphoreTake(ScreenLock, portMAX_DELAY) == pdTRUE) {
-            tumDrawUpdateScreen();
-            tumEventFetchEvents(FETCH_EVENT_BLOCK);
-            xSemaphoreGive(ScreenLock);
-            xSemaphoreGive(DrawSignal);
-            vTaskDelayUntil(&xLastWakeTime,
-                            pdMS_TO_TICKS(frameratePeriod));
-        }
-    }
+	while (1) {
+		if (xSemaphoreTake(ScreenLock, portMAX_DELAY) == pdTRUE) {
+			tumDrawUpdateScreen();
+			tumEventFetchEvents(FETCH_EVENT_BLOCK);
+			xSemaphoreGive(ScreenLock);
+			xSemaphoreGive(DrawSignal);
+			vTaskDelayUntil(&xLastWakeTime,
+					pdMS_TO_TICKS(frameratePeriod));
+		}
+	}
 }
 
 void basicSequentialStateMachine(void *pvParameters)
@@ -559,8 +566,8 @@ void basicSequentialStateMachine(void *pvParameters)
 					if (DrawTask2a) {
 						vTaskSuspend(DrawTask2a);
 						vTaskSuspend(DrawTask2b);
-						vTaskSuspend(ButtonTask3a);
-						vTaskSuspend(ButtonTask3b);
+						// vTaskSuspend(ButtonTask3a);
+						// vTaskSuspend(ButtonTask3b);
 					}
 					if (DrawTask1) {
 						vTaskResume(DrawTask1);
@@ -573,8 +580,8 @@ void basicSequentialStateMachine(void *pvParameters)
 					if (DrawTask2a) {
 						vTaskResume(DrawTask2a);
 						vTaskResume(DrawTask2b);
-						vTaskResume(ButtonTask3a);
-						vTaskResume(ButtonTask3b);
+						// vTaskResume(ButtonTask3a);
+						// vTaskResume(ButtonTask3b);
 					}
 					break;
 				default:
@@ -585,7 +592,6 @@ void basicSequentialStateMachine(void *pvParameters)
 		}
 	}
 }
-
 
 void vDrawTask1(void *pvParameters)
 {
@@ -599,13 +605,13 @@ void vDrawTask1(void *pvParameters)
 			     SQUARE_SIDE_LENGTH, SQUARE_SIDE_LENGTH, Green);
 
 	button_t *button_A =
-		createButton("A", SDL_SCANCODE_A, 0, button_unpressed);
+		createButton("A", SDL_SCANCODE_A, 0, BUTTON_UNPRESSED);
 	button_t *button_B =
-		createButton("B", SDL_SCANCODE_B, 0, button_unpressed);
+		createButton("B", SDL_SCANCODE_B, 0, BUTTON_UNPRESSED);
 	button_t *button_C =
-		createButton("C", SDL_SCANCODE_C, 0, button_unpressed);
+		createButton("C", SDL_SCANCODE_C, 0, BUTTON_UNPRESSED);
 	button_t *button_D =
-		createButton("D", SDL_SCANCODE_D, 0, button_unpressed);
+		createButton("D", SDL_SCANCODE_D, 0, BUTTON_UNPRESSED);
 
 	mouseInfo_t *mouse = createMouseInfo(0, 0);
 	mouseInfo_t *mouseToShift = createMouseInfo(0, 0);
@@ -631,12 +637,13 @@ void vDrawTask1(void *pvParameters)
 
 				handle_coord(mouseToShift);
 
-				DrawInfoText(mouseToShift->mouseX,mouseToShift->mouseY);
+				DrawInfoText(mouseToShift->mouseX,
+					     mouseToShift->mouseY);
 
 				printMouseInfo(
 					mouse,
-					mouseText_X + mouseToShift->mouseX,
-					mouseText_Y + mouseToShift->mouseY);
+					MOUSE_TEXT_X + mouseToShift->mouseX,
+					MOUSE_TEXT_Y + mouseToShift->mouseY);
 
 				coord_t points[3] = {
 					{ CORNER_1_X + mouseToShift->mouseX,
@@ -649,37 +656,37 @@ void vDrawTask1(void *pvParameters)
 
 				Handle_Button(
 					button_A,
-					buttonTextA_X + mouseToShift->mouseX,
-					buttonTextA_Y + mouseToShift->mouseY);
+					BUTTON_TEXT_A_X + mouseToShift->mouseX,
+					BUTTON_TEXT_A_Y + mouseToShift->mouseY);
 				Handle_Button(
 					button_B,
-					buttonTextB_X + mouseToShift->mouseX,
-					buttonTextB_Y + mouseToShift->mouseY);
+					BUTTON_TEXT_B_X + mouseToShift->mouseX,
+					BUTTON_TEXT_B_Y + mouseToShift->mouseY);
 				Handle_Button(
 					button_C,
-					buttonTextC_X + mouseToShift->mouseX,
-					buttonTextC_Y + mouseToShift->mouseY);
+					BUTTON_TEXT_C_X + mouseToShift->mouseX,
+					BUTTON_TEXT_C_Y + mouseToShift->mouseY);
 				Handle_Button(
 					button_D,
-					buttonTextD_X + mouseToShift->mouseX,
-					buttonTextD_Y + mouseToShift->mouseY);
+					BUTTON_TEXT_D_X + mouseToShift->mouseX,
+					BUTTON_TEXT_D_Y + mouseToShift->mouseY);
 
 				clickMouseToResetButtons(
 					button_A,
-					buttonTextA_X + mouseToShift->mouseX,
-					buttonTextA_Y + mouseToShift->mouseY);
+					BUTTON_TEXT_A_X + mouseToShift->mouseX,
+					BUTTON_TEXT_A_Y + mouseToShift->mouseY);
 				clickMouseToResetButtons(
 					button_B,
-					buttonTextB_X + mouseToShift->mouseX,
-					buttonTextB_Y + mouseToShift->mouseY);
+					BUTTON_TEXT_B_X + mouseToShift->mouseX,
+					BUTTON_TEXT_B_Y + mouseToShift->mouseY);
 				clickMouseToResetButtons(
 					button_C,
-					buttonTextC_X + mouseToShift->mouseX,
-					buttonTextC_Y + mouseToShift->mouseY);
+					BUTTON_TEXT_C_X + mouseToShift->mouseX,
+					BUTTON_TEXT_C_Y + mouseToShift->mouseY);
 				clickMouseToResetButtons(
 					button_D,
-					buttonTextD_X + mouseToShift->mouseX,
-					buttonTextD_Y + mouseToShift->mouseY);
+					BUTTON_TEXT_D_X + mouseToShift->mouseX,
+					BUTTON_TEXT_D_Y + mouseToShift->mouseY);
 
 				// Draw some text
 				DrawText(count, mouseToShift->mouseX,
@@ -693,7 +700,7 @@ void vDrawTask1(void *pvParameters)
 				tumDrawCircle(
 					my_circle->x + mouseToShift->mouseX,
 					my_circle->y + mouseToShift->mouseY,
-					my_circle->colour, my_circle->radius);
+					my_circle->radius, my_circle->colour);
 
 				// Let circle rotate around the triangle
 				updateSquarePosition(my_square, count);
@@ -714,33 +721,35 @@ void vDrawTask1(void *pvParameters)
 	}
 }
 
-
-
-void vApplicationGetIdleTaskMemory( StaticTask_t **ppxIdleTaskTCBBuffer,
-                                    StackType_t **ppxIdleTaskStackBuffer,
-                                    uint32_t *pulIdleTaskStackSize )
+void vApplicationGetIdleTaskMemory(StaticTask_t **ppxIdleTaskTCBBuffer,
+				   StackType_t **ppxIdleTaskStackBuffer,
+				   uint32_t *pulIdleTaskStackSize)
 {
-/* If the buffers to be provided to the Idle task are declared inside this
-function then they must be declared static – otherwise they will be allocated on
-the stack and so not exists after this function exits. */
-static StaticTask_t xIdleTaskTCB;
-static StackType_t uxIdleTaskStack[ configMINIMAL_STACK_SIZE ];
+	static StaticTask_t xIdleTaskTCB;
+	static StackType_t uxIdleTaskStack[configMINIMAL_STACK_SIZE];
 
-    /* Pass out a pointer to the StaticTask_t structure in which the Idle task’s
-    state will be stored. */
-    *ppxIdleTaskTCBBuffer = &xIdleTaskTCB;
+	*ppxIdleTaskTCBBuffer = &xIdleTaskTCB;
+	*ppxIdleTaskStackBuffer = uxIdleTaskStack;
+	*pulIdleTaskStackSize = configMINIMAL_STACK_SIZE;
+}
 
-    /* Pass out the array that will be used as the Idle task’s stack. */
-    *ppxIdleTaskStackBuffer = uxIdleTaskStack;
 
-    /* Pass out the size of the array pointed to by *ppxIdleTaskStackBuffer.
-    Note that, as the array is necessarily of type StackType_t,
-    configMINIMAL_STACK_SIZE is specified in words, not bytes. */
-    *pulIdleTaskStackSize = configMINIMAL_STACK_SIZE;
+void vApplicationGetTimerTaskMemory( StaticTask_t **ppxTimerTaskTCBBuffer,
+                                     StackType_t **ppxTimerTaskStackBuffer,
+                                     uint32_t *pulTimerTaskStackSize )
+{
+static StaticTask_t xTimerTaskTCB;
+static StackType_t uxTimerTaskStack[ configTIMER_TASK_STACK_DEPTH ];
+    *ppxTimerTaskTCBBuffer = &xTimerTaskTCB;
+    *ppxTimerTaskStackBuffer = uxTimerTaskStack;
+    *pulTimerTaskStackSize = configTIMER_TASK_STACK_DEPTH;
 }
 
 void vDrawTask2a(void *pvParameters)
 {
+	TickType_t xLastWakeTime;
+	xLastWakeTime = xTaskGetTickCount();
+
 	circle_t *my_circle_left = createCircle(CIRCLE_LEFT_X, CIRCLE_LEFT_Y,
 						CIRCLE_RADIUS, TUMBlue);
 
@@ -748,48 +757,58 @@ void vDrawTask2a(void *pvParameters)
 		if (DrawSignal)
 			if (xSemaphoreTake(DrawSignal, portMAX_DELAY) ==
 			    pdTRUE) {
-				xGetButtonInput();
 				xSemaphoreTake(ScreenLock, portMAX_DELAY);
+				xGetButtonInput();
 				tumDrawClear(White); // Clear screen
-
-				DrawInfoText(0,0);
+				DrawInfoText(0, 0);
+				DrawResetText();
 				DrawInfoTask3();
-
 				tumDrawCircle(my_circle_left->x,
 					      my_circle_left->y,
-					      my_circle_left->colour,
-					      my_circle_left->radius);
+					      my_circle_left->radius,
+					      my_circle_left->colour);
 
 				xSemaphoreGive(ScreenLock);
-				vTaskDelay(500 / portTICK_RATE_MS);
 				vCheckStateInput();
+				vTaskDelayUntil(&xLastWakeTime,
+						500 / portTICK_RATE_MS);
 			}
 	}
 }
 
 void vDrawTask2b(void *pvParameters)
 {
+	TickType_t xLastWakeTime;
+	xLastWakeTime = xTaskGetTickCount();
+
 	circle_t *my_circle_right = createCircle(CIRCLE_RIGHT_X, CIRCLE_RIGHT_Y,
-						 CIRCLE_RADIUS, Green);
+						 CIRCLE_RADIUS, Red);
 	while (1) {
 		if (DrawSignal)
 			if (xSemaphoreTake(DrawSignal, portMAX_DELAY) ==
 			    pdTRUE) {
-				xGetButtonInput();
 				xSemaphoreTake(ScreenLock, portMAX_DELAY);
+				xGetButtonInput();
+				if (buttons.buttons[KEYCODE(T)]) {
+					xSemaphoreGive(Button_T_Signal);
+					vTaskDelay(200 / portTICK_RATE_MS);
+				}
+				if (buttons.buttons[KEYCODE(U)]) {
+					xTaskNotifyGive(ButtonTask3b);
+				}
 				tumDrawClear(White); // Clear screen
-
-				DrawInfoText(0,0);
+				DrawInfoText(0, 0);
 				DrawInfoTask3();
-
+				DrawResetText();
 				tumDrawCircle(my_circle_right->x,
 					      my_circle_right->y,
-					      my_circle_right->colour,
-					      my_circle_right->radius);
+					      my_circle_right->radius,
+					      my_circle_right->colour);
 
 				xSemaphoreGive(ScreenLock);
-				vTaskDelay( 250 / portTICK_RATE_MS);
 				vCheckStateInput();
+				vTaskDelayUntil(&xLastWakeTime,
+						250 / portTICK_RATE_MS);
 			}
 	}
 }
@@ -797,46 +816,53 @@ void vDrawTask2b(void *pvParameters)
 void vButtonTask3a(void *pvParameters)
 {
 	button_t *button_T =
-		createButton("T", SDL_SCANCODE_T, 0, button_unpressed);
+		createButton("T", SDL_SCANCODE_T, 0, BUTTON_UNPRESSED);
 	while (1) {
-		if (DrawSignal)
-			if (xSemaphoreTake(DrawSignal, portMAX_DELAY) ==
-			    pdTRUE) {
-				xGetButtonInput();
-				xSemaphoreTake(ScreenLock, portMAX_DELAY);
-				tumDrawClear(White); // Clear screen
-
-				DrawInfoText(0, 0);
-				DrawInfoTask3();
-
-				Handle_Button(button_T, buttonTextT_X,
-					      buttonTextT_Y);
-				xSemaphoreGive(ScreenLock);
-				vCheckStateInput();
-			}
+		if (xSemaphoreTake(Reset15sec_T_Signal, 5)) {
+			button_T->pressed_count = 0;
+			vTaskDelay(200/portTICK_RATE_MS);
+			xSemaphoreGive(ScreenLock);
+		}
+		if (xSemaphoreTake(Button_T_Signal, portMAX_DELAY)) {
+			Handle_Button(button_T, BUTTON_TEXT_T_X,
+				      BUTTON_TEXT_T_Y);
+			button_T->pressed_count += 1;
+			xSemaphoreGive(ScreenLock);
+		}
+		
 	}
+
 }
 
 void vButtonTask3b(void *pvParameters)
 {
 	button_t *button_U =
-		createButton("U", SDL_SCANCODE_U, 0, button_unpressed);
+		createButton("U", SDL_SCANCODE_U, 0, BUTTON_UNPRESSED);
 	while (1) {
-		if (DrawSignal)
-			if (xSemaphoreTake(DrawSignal, portMAX_DELAY) ==
-			    pdTRUE) {
-				xGetButtonInput();
-				xSemaphoreTake(ScreenLock, portMAX_DELAY);
-				tumDrawClear(White); // Clear screen
+		if (xSemaphoreTake(Reset15sec_U_Signal, 5)) {
+			button_U->pressed_count = 0;	
+		}
+		if (ulTaskNotifyTake(pdTRUE, portMAX_DELAY) > 0) {
+			xGetButtonInput();
+			Handle_Button(button_U, BUTTON_TEXT_U_X,
+				      BUTTON_TEXT_U_Y);
+			button_U->pressed_count += 1;
+		}
+		
+	}
+}
 
-				DrawInfoText(0, 0);
-				DrawInfoTask3();
-
-				Handle_Button(button_U, buttonTextU_X,
-					      buttonTextU_Y);
-				xSemaphoreGive(ScreenLock);
-				vCheckStateInput();
-			}
+void vResetNumberPressedTask3c(void *pvParameters)
+{
+	button_t *button_U =
+		createButton("U", SDL_SCANCODE_U, 0, BUTTON_UNPRESSED);
+	while (1) {
+		if (ulTaskNotifyTake(pdTRUE, portMAX_DELAY) > 0) {
+			xGetButtonInput();
+			Handle_Button(button_U, BUTTON_TEXT_U_X,
+				      BUTTON_TEXT_U_Y);
+			button_U->pressed_count += 1;
+		}
 	}
 }
 
@@ -862,7 +888,6 @@ void vButtonTask3b(void *pvParameters)
 // 					tumDrawText(our_string, infoTask4_X,
 // 						    infoTask4_Y, Black);
 
-	
 // 				xSemaphoreGive(ScreenLock);
 // 				vTaskDelay( 1000 / portTICK_RATE_MS);
 // 				vCheckStateInput();
@@ -902,27 +927,49 @@ int main(int argc, char *argv[])
 		PRINT_ERROR("Failed to create draw signal");
 	}
 
+	Reset15sec_T_Signal = xSemaphoreCreateBinary(); // Screen buffer locking
+	if (!DrawSignal) {
+		PRINT_ERROR("Failed to create reset signal");
+	}
+
+	Reset15sec_U_Signal = xSemaphoreCreateBinary(); // Screen buffer locking
+	if (!DrawSignal) {
+		PRINT_ERROR("Failed to create reset signal");
+	}
+
 	ScreenLock = xSemaphoreCreateMutex();
-    if (!ScreenLock) {
-        PRINT_ERROR("Failed to create screen lock");
-    }
+	if (!ScreenLock) {
+		PRINT_ERROR("Failed to create screen lock");
+	}
+
+	Button_T_Signal =
+		xSemaphoreCreateBinary(); // Give signal when button is pressed
+	if (!Button_T_Signal) {
+		PRINT_ERROR("Failed to create button T signal");
+	}
+
+	Button_U_Signal =
+		xSemaphoreCreateBinary(); // Give signal when button is pressed
+	if (!Button_U_Signal) {
+		PRINT_ERROR("Failed to create button U signal");
+	}
 
 	StateQueue = xQueueCreate(STATE_QUEUE_LENGTH, sizeof(unsigned char));
-    if (!StateQueue) {
-        PRINT_ERROR("Could not open state queue");
-        goto err_state_queue;
-    }
+	if (!StateQueue) {
+		PRINT_ERROR("Could not open state queue");
+		goto err_state_queue;
+	}
 
 	if (xTaskCreate(vSwapBuffers, "BufferSwapTask",
-                    mainGENERIC_STACK_SIZE * 2, NULL, configMAX_PRIORITIES,
-                    BufferSwap) != pdPASS) {
-        PRINT_TASK_ERROR("BufferSwapTask");
-    }
+			mainGENERIC_STACK_SIZE * 2, NULL, configMAX_PRIORITIES,
+			BufferSwap) != pdPASS) {
+		PRINT_TASK_ERROR("BufferSwapTask");
+	}
 
 	if (xTaskCreate(basicSequentialStateMachine, "StateMachine",
-                    mainGENERIC_STACK_SIZE * 2, NULL,
-                    configMAX_PRIORITIES - 1, &StateMachine) != pdPASS) {
-        PRINT_TASK_ERROR("StateMachine");
+			mainGENERIC_STACK_SIZE * 2, NULL,
+			configMAX_PRIORITIES - 1, &StateMachine) != pdPASS) {
+		PRINT_TASK_ERROR("StateMachine");
 	}
 
 	if (xTaskCreate(vDrawTask1, "DrawTask1", mainGENERIC_STACK_SIZE * 2,
@@ -930,28 +977,51 @@ int main(int argc, char *argv[])
 		PRINT_TASK_ERROR("DrawTask1");
 		goto err_demotask1;
 	}
-	DrawTask2a = xTaskCreateStatic(vDrawTask2a, "DrawTask2a",
-				       STACK_SIZE, NULL,
-				       configMAX_PRIORITIES - 1, xStack, &xTaskBuffer);
+
+	DrawTask2a = xTaskCreateStatic(vDrawTask2a, "DrawTask2a", STACK_SIZE,
+				       NULL, configMAX_PRIORITIES - 2, xStack,
+				       &xTaskBuffer);
+
 	if (xTaskCreate(vDrawTask2b, "DrawTask2b", mainGENERIC_STACK_SIZE * 2,
-			NULL, configMAX_PRIORITIES - 1 , &DrawTask2b) != pdPASS) {
+			NULL, configMAX_PRIORITIES - 2,
+			&DrawTask2b) != pdPASS) {
 		PRINT_TASK_ERROR("DrawTask2b");
 	}
 
-	if (xTaskCreate(vButtonTask3a, "ButtonTask3a", mainGENERIC_STACK_SIZE * 2,
-			NULL, configMAX_PRIORITIES - 2 , &ButtonTask3a) != pdPASS) {
+	if (xTaskCreate(vButtonTask3a, "ButtonTask3a",
+			mainGENERIC_STACK_SIZE * 2, NULL,
+			configMAX_PRIORITIES - 3, &ButtonTask3a) != pdPASS) {
 		PRINT_TASK_ERROR("ButtonTask3a");
 	}
 
-	if (xTaskCreate(vButtonTask3b, "ButtonTask3b", mainGENERIC_STACK_SIZE * 2,
-			NULL, configMAX_PRIORITIES - 2, &ButtonTask3b) != pdPASS) {
+	if (xTaskCreate(vButtonTask3b, "ButtonTask3b",
+			mainGENERIC_STACK_SIZE * 2, NULL,
+			configMAX_PRIORITIES - 2, &ButtonTask3b) != pdPASS) {
 		PRINT_TASK_ERROR("ButtonTask3b");
 	}
+
+	ResetButtonNum15sec =
+		xTimerCreate("reset15sec",
+			     15000 / portTICK_PERIOD_MS, // Period time
+			     pdTRUE, // Auto reload
+			     (void *)0,
+			     vTimerCallbackReset15sec); // Callback
+	if (ResetButtonNum15sec == NULL) {
+		for(;;); // Failure
+	}
+	if (xTimerStart(ResetButtonNum15sec,0) != pdPASS) {
+		for(;;); // Failure
+	}
+             
 
 	// if (xTaskCreate(vButtonTask4, "ButtonTask4", mainGENERIC_STACK_SIZE * 2,
 	// 		NULL, configMAX_PRIORITIES - 1 , &ButtonTask4) != pdPASS) {
 	// 	PRINT_TASK_ERROR("ButtonTask4");
 	// }
+
+	vTaskSuspend(DrawTask1);
+    vTaskSuspend(DrawTask2a);
+	vTaskSuspend(DrawTask2b);
 
 	vTaskStartScheduler();
 
@@ -962,14 +1032,13 @@ err_demotask1:
 err_buttons_lock:
 	tumSoundExit();
 err_state_queue:
-    vSemaphoreDelete(ScreenLock);
+	vSemaphoreDelete(ScreenLock);
 err_init_audio:
 	tumEventExit();
 err_init_events:
 	tumDrawExit();
 err_init_drawing:
 	return EXIT_FAILURE;
-
 }
 
 // cppcheck-suppress unusedFunction
