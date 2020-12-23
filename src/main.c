@@ -32,6 +32,9 @@
 
 #define NEXT_TASK 0
 #define PREV_TASK 1
+#define NUMBER_STRING_EX4 15
+#define LEN_STRING_EX4 60
+
 
 // Set all states
 #define STATE_ONE 0
@@ -100,12 +103,6 @@
 // Set coord for text to draw (EX4)
 #define STRING_EX4_X 20
 #define STRING_EX4_Y 20
-#define TASK2_EX4_X 60
-#define TASK2_EX4_Y 40
-#define TASK3_EX4_X 100
-#define TASK3_EX4_Y 60
-#define TASK4_EX4_X 140
-#define TASK4_EX4_Y 80
 
 // PRIORITIES EX4
 #define  PRIORITY_TASK1EX4 1
@@ -153,7 +150,7 @@ static unsigned int reading = BUTTON_UNPRESSED;
 static unsigned int GLBcount = 0;
 static TickType_t StartTickCount = 0;
 static TickType_t TickCount = 0;
-static char stringEx4[20][50];
+static char **stringEx4;
 
 /*=======================FUNCTION========================*/
 typedef struct circle {
@@ -595,7 +592,6 @@ void basicSequentialStateMachine(void *pvParameters)
 	unsigned char current_state = STARTING_STATE; // Default state
 	unsigned char state_changed = 1;
 	unsigned char input = 0;
-
 	while (1) {
 		if (state_changed) {
 			goto initial_state;
@@ -809,9 +805,8 @@ void vDrawTask1(void *pvParameters)
 					my_square->w, my_square->h,
 					my_square->colour);
 
+				count++; // increse count in to update for rotation
 				// Basic sleep of 100 milliseconds
-
-				count++;
 				vTaskDelay((TickType_t)100);
 				xSemaphoreGive(ScreenLock);
 
@@ -973,13 +968,14 @@ void vButtonTask4(void *pvParameters)
 void vDrawScreenEx4(void *pvParameters)
 {
 	unsigned int i = 0;
+	stringEx4 = malloc(NUMBER_STRING_EX4 * sizeof(char *));
+	for (int i = 0; i < NUMBER_STRING_EX4; i++)
+		stringEx4[i] = malloc((LEN_STRING_EX4 + 1) * sizeof(char));
+
 	while (1) {
 		if (DrawSignal)
 			if (xSemaphoreTake(DrawSignal, portMAX_DELAY) ==
 			    pdTRUE) {
-				tumEventFetchEvents(FETCH_EVENT_BLOCK |
-						    FETCH_EVENT_NO_GL_CHECK);
-
 				xSemaphoreTake(ScreenLock, portMAX_DELAY);
 				tumDrawClear(White); // Clear screen
 				xGetButtonInput();
@@ -988,9 +984,8 @@ void vDrawScreenEx4(void *pvParameters)
 				for (i = 0; i <= 14; i++) {
 					tumDrawText(stringEx4[i], STRING_EX4_X,
 						    STRING_EX4_Y + 20 * i,
-						    TUMBlue);
+						    TUMBlue);		
 				}
-
 				xSemaphoreGive(ScreenLock);
 				vCheckStateInput();
 			}
@@ -999,23 +994,32 @@ void vDrawScreenEx4(void *pvParameters)
 
 void vDrawTask1Ex4(void *pvParameters)
 {
+	
 	TickType_t xLastWakeTime;
 	xLastWakeTime = xTaskGetTickCount();
 	static char TextTask1Ex4[100];
 	while (1) {
+		xLastWakeTime = xTaskGetTickCount();
+		vTaskDelayUntil(&xLastWakeTime, 1);
 		TickCount = xTaskGetTickCount() - StartTickCount;
-		if (TickCount == 15){
-					vTaskSuspend(DrawTask1Ex4);
+		if (TickCount == 16){
 					vTaskSuspend(DrawTask2Ex4);
 					vTaskSuspend(DrawTask3Ex4);
 					vTaskSuspend(DrawTask4Ex4);
+					vTaskSuspend(DrawTask1Ex4);
 				}
-		vTaskDelayUntil(&xLastWakeTime, 1);
+		
 		xGetButtonInput();
 		TickCount = xTaskGetTickCount() - StartTickCount;
-		if (TickCount <= 15){
+		if ((TickCount <= 15) && (TickCount  != 0)){
 					sprintf(TextTask1Ex4, "Tick%d : 1 |", TickCount);
 					strcat(stringEx4[TickCount-1],TextTask1Ex4);
+		}
+		if(TickCount  == 0){
+			stringEx4 = malloc(NUMBER_STRING_EX4 * sizeof(char *));
+			for (int i = 0; i < NUMBER_STRING_EX4; i++)
+				stringEx4[i] = malloc((LEN_STRING_EX4 + 1) *
+						      sizeof(char));
 		}
 		vCheckStateInput();
 	}
@@ -1023,24 +1027,31 @@ void vDrawTask1Ex4(void *pvParameters)
 
 void vDrawTask2Ex4(void *pvParameters)
 {
+	
 	TickType_t xLastWakeTime;
 	xLastWakeTime = xTaskGetTickCount();
 	static char TextTask2Ex4[100];
 	while (1) {
+		xLastWakeTime = xTaskGetTickCount();
+		vTaskDelayUntil(&xLastWakeTime, 2);	
 		TickCount = xTaskGetTickCount() - StartTickCount;
-		if (TickCount == 15){
-					vTaskSuspend(DrawTask1Ex4);
-					vTaskSuspend(DrawTask2Ex4);
+		if (TickCount == 16){
+					vTaskSuspend(DrawTask1Ex4);			
 					vTaskSuspend(DrawTask3Ex4);
 					vTaskSuspend(DrawTask4Ex4);
+					vTaskSuspend(DrawTask2Ex4);
 				}
-		vTaskDelayUntil(&xLastWakeTime, 2);
 		
 		xGetButtonInput();
-		TickCount = xTaskGetTickCount() - StartTickCount;
-		if (TickCount <= 15){
+		if ((TickCount <= 15) && (TickCount  != 0)){
 					sprintf(TextTask2Ex4, "Tick%d : 2 |", TickCount);
 					strcat(stringEx4[TickCount-1],TextTask2Ex4);
+		}
+		if(TickCount  == 0){
+			stringEx4 = malloc(NUMBER_STRING_EX4 * sizeof(char *));
+			for (int i = 0; i < NUMBER_STRING_EX4; i++)
+				stringEx4[i] = malloc((LEN_STRING_EX4 + 1) *
+						      sizeof(char));
 		}
 		xSemaphoreGive(WakeUpTask3Ex4);
 		vCheckStateInput();
@@ -1049,23 +1060,34 @@ void vDrawTask2Ex4(void *pvParameters)
 
 void vDrawTask3Ex4(void *pvParameters)
 {
+	
 	static char TextTask3Ex4[100];
 	while (1) {
 		TickCount = xTaskGetTickCount() - StartTickCount;
-		if (TickCount == 15){
+		if (TickCount == 16){
 					vTaskSuspend(DrawTask1Ex4);
 					vTaskSuspend(DrawTask2Ex4);
-					vTaskSuspend(DrawTask3Ex4);
+					
 					vTaskSuspend(DrawTask4Ex4);
+					vTaskSuspend(DrawTask3Ex4);
 				}
 		if (xSemaphoreTake(WakeUpTask3Ex4, portMAX_DELAY)) {
 			xGetButtonInput();
 			TickCount = xTaskGetTickCount() - StartTickCount;
-			if (TickCount <= 15){
-					sprintf(TextTask3Ex4, "Tick%d : 3 |", TickCount);
-					strcat(stringEx4[TickCount-1],TextTask3Ex4);
-		}
-			
+			if ((TickCount <= 15)&& (TickCount  != 0)){
+				sprintf(TextTask3Ex4, "Tick%d : 3 |",
+					TickCount);
+				strcat(stringEx4[TickCount - 1], TextTask3Ex4);
+			}
+			if (TickCount == 0) {
+				stringEx4 = malloc(NUMBER_STRING_EX4 *
+						   sizeof(char *));
+				for (int i = 0; i < NUMBER_STRING_EX4; i++)
+					stringEx4[i] =
+						malloc((LEN_STRING_EX4 + 1) *
+						       sizeof(char));
+			}
+
 			vCheckStateInput();
 		}
 	}
@@ -1073,23 +1095,34 @@ void vDrawTask3Ex4(void *pvParameters)
 
 void vDrawTask4Ex4(void *pvParameters)
 {
+	
 	TickType_t xLastWakeTime;
+	TickType_t xCurrentTime;
 	static char TextTask4Ex4[100];
 	xLastWakeTime = xTaskGetTickCount();
 	while (1) {
-		TickCount = xTaskGetTickCount() - StartTickCount;
-		if (TickCount == 15){
+		xLastWakeTime = xTaskGetTickCount();
+		vTaskDelayUntil(&xLastWakeTime, 4);
+		TickCount = 0;
+		xCurrentTime = xTaskGetTickCount();
+		TickCount = xCurrentTime - StartTickCount;
+		if (TickCount == 16){
 					vTaskSuspend(DrawTask1Ex4);
 					vTaskSuspend(DrawTask2Ex4);
 					vTaskSuspend(DrawTask3Ex4);
 					vTaskSuspend(DrawTask4Ex4);
 				}
-		vTaskDelayUntil(&xLastWakeTime, 4);
+		
 		xGetButtonInput();
-		TickCount = xTaskGetTickCount() - StartTickCount;
-		if (TickCount <= 15){
+		if ((TickCount <= 15) && (TickCount  != 0)){
 					sprintf(TextTask4Ex4, "Tick%d : 4 |", TickCount);
 					strcat(stringEx4[TickCount-1],TextTask4Ex4);
+		}
+		if(TickCount  == 0){
+			stringEx4 = malloc(NUMBER_STRING_EX4 * sizeof(char *));
+			for (int i = 0; i < NUMBER_STRING_EX4; i++)
+				stringEx4[i] = malloc((LEN_STRING_EX4 + 1) *
+						      sizeof(char));
 		}
 		vCheckStateInput();
 	}
@@ -1225,7 +1258,7 @@ int main(int argc, char *argv[])
 
 
 	if (xTaskCreate(vDrawScreenEx4, "DrawScreenEx4", mainGENERIC_STACK_SIZE * 2,
-			NULL, configMAX_PRIORITIES -1 , &DrawScreenEx4) != pdPASS) {
+			NULL, configMAX_PRIORITIES -2 , &DrawScreenEx4) != pdPASS) {
 		PRINT_TASK_ERROR("DrawScreenEx4");
 	}
 
@@ -1252,11 +1285,11 @@ int main(int argc, char *argv[])
 	vTaskSuspend(DrawTask1);
     vTaskSuspend(DrawTask2a);
 	vTaskSuspend(DrawTask2b);
+	vTaskSuspend(DrawScreenEx4);
 	vTaskSuspend(DrawTask1Ex4);
 	vTaskSuspend(DrawTask2Ex4);
 	vTaskSuspend(DrawTask3Ex4);
 	vTaskSuspend(DrawTask4Ex4);
-	vTaskSuspend(DrawScreenEx4);
 	xTimerStop(ResetButtonNum15sec, 0);
 
 	vTaskStartScheduler();

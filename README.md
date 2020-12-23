@@ -1,6 +1,6 @@
 # Excercises
 
-1. Use `Button:E` to change between the excercises[3 sreens for 3 exercises (2,3,4), begin with exercise 2)]
+1. Use `Button:E` to change between the excercises [3 sreens for 3 exercises (2,3,4), begin with exercise 2]
 2. Use `Button:Q` to quit.
 ## Excercise 2 
 1. Use `Button:A`, `Button:B`, `Button:C`, `Button:D`  to count the number of times they were pressed.
