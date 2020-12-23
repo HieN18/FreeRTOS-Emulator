@@ -1035,13 +1035,14 @@ void vDrawTask2Ex4(void *pvParameters)
 					vTaskSuspend(DrawTask4Ex4);
 				}
 		vTaskDelayUntil(&xLastWakeTime, 2);
-		xSemaphoreGive(WakeUpTask3Ex4);
+		
 		xGetButtonInput();
 		TickCount = xTaskGetTickCount() - StartTickCount;
 		if (TickCount <= 15){
 					sprintf(TextTask2Ex4, "Tick%d : 2 |", TickCount);
 					strcat(stringEx4[TickCount-1],TextTask2Ex4);
 		}
+		xSemaphoreGive(WakeUpTask3Ex4);
 		vCheckStateInput();
 	}
 }
